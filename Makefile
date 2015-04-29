@@ -286,6 +286,14 @@ ifeq ($(USE_CUDNN), 1)
 	COMMON_FLAGS += -DUSE_CUDNN
 endif
 
+# MPI configuration
+ifeq ($(USE_MPI), 1)
+  LIBRARIES += mpi mpi_cxx
+  COMMON_FLAGS += -DUSE_MPI
+  INCLUDE_DIRS += $(MPI_INCLUDE)
+  LIBRARY_DIRS += $(MPI_LIB)
+endif
+
 # CPU-only configuration
 ifeq ($(CPU_ONLY), 1)
 	OBJS := $(PROTO_OBJS) $(CXX_OBJS)

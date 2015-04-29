@@ -101,6 +101,11 @@ class Net {
   /// @brief Writes the net to a proto.
   void ToProto(NetParameter* param, bool write_diff = false) const;
 
+#ifdef USE_MPI
+  // Synchronize the parameters of each layer among all the MPI processors.
+  void SyncLayers();
+#endif
+
   /// @brief returns the network name.
   inline const string& name() const { return name_; }
   /// @brief returns the layer names
