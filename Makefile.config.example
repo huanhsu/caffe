@@ -4,6 +4,11 @@
 # cuDNN acceleration switch (uncomment to build with cuDNN).
 # USE_CUDNN := 1
 
+# MPI data parallelization switch (uncomment to build with MPI).
+# USE_MPI := 1
+# MPI_INCLUDE := /path/to/your/openmpi
+# MPI_LIB := /path/to/your/openmpi
+
 # CPU-only switch (uncomment to build without GPU support).
 # CPU_ONLY := 1
 

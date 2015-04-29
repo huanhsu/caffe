@@ -4,6 +4,9 @@
 
 #include <string>
 #include <vector>
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
 
 #include "caffe/common.hpp"
 #include "caffe/data_layers.hpp"
@@ -30,12 +33,19 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   cursor_.reset(db_->NewCursor());
 
   // Check if we should randomly skip a few data points
+  unsigned int skip = 0;
   if (this->layer_param_.data_param().rand_skip()) {
-    unsigned int skip = caffe_rng_rand() %
-                        this->layer_param_.data_param().rand_skip();
-    LOG(INFO) << "Skipping first " << skip << " data points.";
-    while (skip-- > 0) {
-      cursor_->Next();
+    skip = caffe_rng_rand() % this->layer_param_.data_param().rand_skip();
+  }
+#ifdef USE_MPI
+  MPI_Bcast(&skip, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  skip += this->layer_param_.data_param().batch_size() * Caffe::mpi_rank();
+#endif
+  LOG(INFO) << "Skipping first " << skip << " data points.";
+  while (skip-- > 0) {
+    cursor_->Next();
+    if (!cursor_->valid()) {
+      cursor_->SeekToFirst();
     }
   }
   // Read a data point, and use it to initialize the top blob.
@@ -154,6 +164,14 @@ void DataLayer<Dtype>::InternalThreadEntry() {
       cursor_->SeekToFirst();
     }
   }
+#ifdef USE_MPI
+  for (int i = 0; i < batch_size * (Caffe::mpi_size() - 1); ++i) {
+    cursor_->Next();
+    if (!cursor_->valid()) {
+      cursor_->SeekToFirst();
+    }
+  }
+#endif
   batch_timer.Stop();
   DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
   DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";

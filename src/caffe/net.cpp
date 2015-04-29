@@ -4,6 +4,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
 
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
@@ -738,6 +741,34 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff) const {
     layers_[i]->ToProto(layer_param, write_diff);
   }
 }
+
+#ifdef USE_MPI
+template<>
+void Net<float>::SyncLayers() {
+  for (int i = 0; i < layers_.size(); ++i) {
+    vector<shared_ptr<Blob<float> > >& blobs = layers_[i]->blobs();
+    for (int j = 0; j < blobs.size(); ++j) {
+      MPI_Bcast(blobs[j]->mutable_cpu_data(), blobs[j]->count(), MPI_FLOAT,
+                0, MPI_COMM_WORLD);
+      MPI_Bcast(blobs[j]->mutable_cpu_diff(), blobs[j]->count(), MPI_FLOAT,
+                0, MPI_COMM_WORLD);
+    }
+  }
+}
+
+template<>
+void Net<double>::SyncLayers() {
+  for (int i = 0; i < layers_.size(); ++i) {
+    vector<shared_ptr<Blob<double> > >& blobs = layers_[i]->blobs();
+    for (int j = 0; j < blobs.size(); ++j) {
+      MPI_Bcast(blobs[j]->mutable_cpu_data(), blobs[j]->count(), MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+      MPI_Bcast(blobs[j]->mutable_cpu_diff(), blobs[j]->count(), MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+    }
+  }
+}
+#endif
 
 template <typename Dtype>
 void Net<Dtype>::Update() {

@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#ifdef USE_MPI
+#include <mpi.h>
+#endif
 
 #include "caffe/net.hpp"
 #include "caffe/proto/caffe.pb.h"
@@ -12,6 +15,54 @@
 #include "caffe/util/upgrade_proto.hpp"
 
 namespace caffe {
+
+#ifdef USE_MPI
+// Average losses across all the MPI processors.
+static void g_average_losses(float* loss) {
+  MPI_Allreduce(MPI_IN_PLACE, loss, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+  (*loss) /= Caffe::mpi_size();
+}
+static void g_average_losses(double* loss) {
+  MPI_Allreduce(MPI_IN_PLACE, loss, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  (*loss) /= Caffe::mpi_size();
+}
+
+// Average blob data across all the MPI processors.
+static void g_average_data(Blob<float>* blob) {
+  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_data(), blob->count(),
+                MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+  caffe_scal(blob->count(), 1.0f / Caffe::mpi_size(), blob->mutable_cpu_data());
+}
+static void g_average_data(Blob<double>* blob) {
+  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_data(), blob->count(),
+                MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  caffe_scal(blob->count(), 1.0 / Caffe::mpi_size(), blob->mutable_cpu_data());
+}
+
+// Average blob diffs across all the MPI processors.
+static void g_average_cpu_diffs(const shared_ptr<Blob<float> >& blob) {
+  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
+                MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+  caffe_scal(blob->count(), 1.0f / Caffe::mpi_size(), blob->mutable_cpu_diff());
+}
+static void g_average_gpu_diffs(const shared_ptr<Blob<float> >& blob) {
+  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
+                MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+  caffe_gpu_scal(blob->count(), 1.0f / Caffe::mpi_size(),
+                 blob->mutable_gpu_diff());
+}
+static void g_average_cpu_diffs(const shared_ptr<Blob<double> >& blob) {
+  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
+                MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  caffe_scal(blob->count(), 1.0 / Caffe::mpi_size(), blob->mutable_cpu_diff());
+}
+static void g_average_gpu_diffs(const shared_ptr<Blob<double> >& blob) {
+  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
+                MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  caffe_gpu_scal(blob->count(), 1.0 / Caffe::mpi_size(),
+                 blob->mutable_gpu_diff());
+}
+#endif
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param)
@@ -80,6 +131,9 @@ void Solver<Dtype>::InitTrainNet() {
   net_state.MergeFrom(param_.train_state());
   net_param.mutable_state()->CopyFrom(net_state);
   net_.reset(new Net<Dtype>(net_param));
+#ifdef USE_MPI
+  net_->SyncLayers();
+#endif
 }
 
 template <typename Dtype>
@@ -155,6 +209,9 @@ void Solver<Dtype>::InitTestNets() {
         << "Creating test net (#" << i << ") specified by " << sources[i];
     test_nets_[i].reset(new Net<Dtype>(net_params[i]));
     test_nets_[i]->set_debug_info(param_.debug_info());
+#ifdef USE_MPI
+    test_nets_[i]->SyncLayers();
+#endif
   }
 }
 
@@ -176,6 +233,9 @@ void Solver<Dtype>::Step(int iters) {
     const bool display = param_.display() && iter_ % param_.display() == 0;
     net_->set_debug_info(display && param_.debug_info());
     Dtype loss = net_->ForwardBackward(bottom_vec);
+#ifdef USE_MPI
+    g_average_losses(&loss);
+#endif
     if (losses.size() < average_loss) {
       losses.push_back(loss);
       int size = losses.size();
@@ -190,6 +250,9 @@ void Solver<Dtype>::Step(int iters) {
       const vector<Blob<Dtype>*>& result = net_->output_blobs();
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
+#ifdef USE_MPI
+        g_average_data(result[j]);
+#endif
         const Dtype* result_vec = result[j]->cpu_data();
         const string& output_name =
             net_->blob_names()[net_->output_blob_indices()[j]];
@@ -244,6 +307,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   // display the loss, which is computed in the forward pass.
   if (param_.display() && iter_ % param_.display() == 0) {
     Dtype loss;
+#ifdef USE_MPI
+    g_average_losses(&loss);
+#endif
     net_->ForwardPrefilled(&loss);
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
@@ -252,7 +318,6 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   }
   LOG(INFO) << "Optimization Done.";
 }
-
 
 template <typename Dtype>
 void Solver<Dtype>::TestAll() {
@@ -299,6 +364,9 @@ void Solver<Dtype>::Test(const int test_net_id) {
   }
   if (param_.test_compute_loss()) {
     loss /= param_.test_iter(test_net_id);
+#ifdef USE_MPI
+    g_average_losses(&loss);
+#endif
     LOG(INFO) << "Test loss: " << loss;
   }
   for (int i = 0; i < test_score.size(); ++i) {
@@ -307,7 +375,10 @@ void Solver<Dtype>::Test(const int test_net_id) {
     const string& output_name = test_net->blob_names()[output_blob_index];
     const Dtype loss_weight = test_net->blob_loss_weights()[output_blob_index];
     ostringstream loss_msg_stream;
-    const Dtype mean_score = test_score[i] / param_.test_iter(test_net_id);
+    Dtype mean_score = test_score[i] / param_.test_iter(test_net_id);
+#ifdef USE_MPI
+    g_average_losses(&mean_score);
+#endif
     if (loss_weight) {
       loss_msg_stream << " (* " << loss_weight
                       << " = " << loss_weight * mean_score << " loss)";
@@ -317,9 +388,11 @@ void Solver<Dtype>::Test(const int test_net_id) {
   }
 }
 
-
 template <typename Dtype>
 void Solver<Dtype>::Snapshot() {
+#ifdef USE_MPI
+  if (Caffe::mpi_rank() != 0) return;
+#endif
   NetParameter net_param;
   // For intermediate results, we will also dump the gradient values.
   net_->ToProto(&net_param, param_.snapshot_diff());
@@ -470,6 +543,9 @@ void SGDSolver<Dtype>::ComputeUpdateValue() {
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int param_id = 0; param_id < net_params.size(); ++param_id) {
+#ifdef USE_MPI
+      g_average_cpu_diffs(net_params[param_id]);
+#endif
       // Compute the value to history, and then copy them to the blob's diff.
       Dtype local_rate = rate * net_params_lr[param_id];
       Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
@@ -506,6 +582,9 @@ void SGDSolver<Dtype>::ComputeUpdateValue() {
   case Caffe::GPU:
 #ifndef CPU_ONLY
     for (int param_id = 0; param_id < net_params.size(); ++param_id) {
+#ifdef USE_MPI
+      g_average_gpu_diffs(net_params[param_id]);
+#endif
       // Compute the value to history, and then copy them to the blob's diff.
       Dtype local_rate = rate * net_params_lr[param_id];
       Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
@@ -585,6 +664,9 @@ void NesterovSolver<Dtype>::ComputeUpdateValue() {
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int param_id = 0; param_id < net_params.size(); ++param_id) {
+#ifdef USE_MPI
+      g_average_cpu_diffs(net_params[param_id]);
+#endif
       // save history momentum for stepping back
       caffe_copy(net_params[param_id]->count(),
           this->history_[param_id]->cpu_data(),
@@ -632,6 +714,9 @@ void NesterovSolver<Dtype>::ComputeUpdateValue() {
   case Caffe::GPU:
 #ifndef CPU_ONLY
     for (int param_id = 0; param_id < net_params.size(); ++param_id) {
+#ifdef USE_MPI
+      g_average_gpu_diffs(net_params[param_id]);
+#endif
       // save history momentum for stepping back
       caffe_copy(net_params[param_id]->count(),
           this->history_[param_id]->gpu_data(),
@@ -702,6 +787,9 @@ void AdaGradSolver<Dtype>::ComputeUpdateValue() {
   switch (Caffe::mode()) {
   case Caffe::CPU:
     for (int param_id = 0; param_id < net_params.size(); ++param_id) {
+#ifdef USE_MPI
+      g_average_cpu_diffs(net_params[param_id]);
+#endif
       Dtype local_rate = rate * net_params_lr[param_id];
       Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
 
@@ -758,6 +846,9 @@ void AdaGradSolver<Dtype>::ComputeUpdateValue() {
   case Caffe::GPU:
 #ifndef CPU_ONLY
     for (int param_id = 0; param_id < net_params.size(); ++param_id) {
+#ifdef USE_MPI
+      g_average_gpu_diffs(net_params[param_id]);
+#endif
       Dtype local_rate = rate * net_params_lr[param_id];
       Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
 
