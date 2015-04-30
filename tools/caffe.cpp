@@ -346,6 +346,7 @@ int time() {
       const vector<shared_ptr<Blob<float> > >& blobs = layers[i]->blobs();
       timer.Start();
       for (int j = 0; j < blobs.size(); ++j) {
+        if (Caffe::mpi_size() == 1) continue;
         MPI_Allreduce(MPI_IN_PLACE, blobs[j]->mutable_cpu_diff(),
                       blobs[j]->count(), MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
         caffe_scal(blobs[j]->count(), 1.0f / Caffe::mpi_size(),

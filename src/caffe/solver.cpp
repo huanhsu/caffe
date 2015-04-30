@@ -19,21 +19,25 @@ namespace caffe {
 #ifdef USE_MPI
 // Average losses across all the MPI processors.
 static void g_average_losses(float* loss) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, loss, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
   (*loss) /= Caffe::mpi_size();
 }
 static void g_average_losses(double* loss) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, loss, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   (*loss) /= Caffe::mpi_size();
 }
 
 // Average blob data across all the MPI processors.
 static void g_average_data(Blob<float>* blob) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_data(), blob->count(),
                 MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
   caffe_scal(blob->count(), 1.0f / Caffe::mpi_size(), blob->mutable_cpu_data());
 }
 static void g_average_data(Blob<double>* blob) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_data(), blob->count(),
                 MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   caffe_scal(blob->count(), 1.0 / Caffe::mpi_size(), blob->mutable_cpu_data());
@@ -41,22 +45,26 @@ static void g_average_data(Blob<double>* blob) {
 
 // Average blob diffs across all the MPI processors.
 static void g_average_cpu_diffs(const shared_ptr<Blob<float> >& blob) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
                 MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
   caffe_scal(blob->count(), 1.0f / Caffe::mpi_size(), blob->mutable_cpu_diff());
 }
 static void g_average_gpu_diffs(const shared_ptr<Blob<float> >& blob) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
                 MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
   caffe_gpu_scal(blob->count(), 1.0f / Caffe::mpi_size(),
                  blob->mutable_gpu_diff());
 }
 static void g_average_cpu_diffs(const shared_ptr<Blob<double> >& blob) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
                 MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   caffe_scal(blob->count(), 1.0 / Caffe::mpi_size(), blob->mutable_cpu_diff());
 }
 static void g_average_gpu_diffs(const shared_ptr<Blob<double> >& blob) {
+  if (Caffe::mpi_size() == 1) return;
   MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
                 MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   caffe_gpu_scal(blob->count(), 1.0 / Caffe::mpi_size(),
