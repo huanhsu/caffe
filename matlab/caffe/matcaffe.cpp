@@ -63,10 +63,12 @@ static mxArray* do_forward(const mxArray* const bottom) {
       mex_error("MatCaffe require single-precision float point data");
     }
     if (mxGetNumberOfElements(elem) != input_blobs[i]->count()) {
-      std::string error_msg;
-      error_msg += "MatCaffe input size does not match the input size ";
-      error_msg += "of the network";
-      mex_error(error_msg);
+      const mwSize* elem_size = mxGetDimensions(elem);
+      mwSize num_dims = mxGetNumberOfDimensions(elem);
+      vector<int> shapes(num_dims);
+      for (int j = 0; j < num_dims; ++j)
+        shapes[j] = elem_size[num_dims - j - 1];
+      input_blobs[i]->Reshape(shapes);
     }
 
     const float* const data_ptr =
