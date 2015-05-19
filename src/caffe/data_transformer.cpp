@@ -43,6 +43,9 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   const int datum_width = datum.width();
 
   const int crop_size = param_.crop_size();
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
   const bool has_mean_file = param_.has_mean_file();
@@ -50,8 +53,8 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   const bool has_mean_values = mean_values_.size() > 0;
 
   CHECK_GT(datum_channels, 0);
-  CHECK_GE(datum_height, crop_size);
-  CHECK_GE(datum_width, crop_size);
+  CHECK_GE(datum_height, crop_height);
+  CHECK_GE(datum_width, crop_width);
 
   Dtype* mean = NULL;
   if (has_mean_file) {
@@ -76,16 +79,20 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
 
   int h_off = 0;
   int w_off = 0;
-  if (crop_size) {
-    height = crop_size;
-    width = crop_size;
-    // We only do random crop when we do training.
+  if (crop_height) {
+    height = crop_height;
     if (phase_ == TRAIN) {
-      h_off = Rand(datum_height - crop_size + 1);
-      w_off = Rand(datum_width - crop_size + 1);
+      h_off = Rand(datum_height - crop_height + 1);
     } else {
-      h_off = (datum_height - crop_size) / 2;
-      w_off = (datum_width - crop_size) / 2;
+      h_off = (datum_height - crop_height) / 2;
+    }
+  }
+  if (crop_width) {
+    width = crop_width;
+    if (phase_ == TRAIN) {
+      w_off = Rand(datum_width - crop_width + 1);
+    } else {
+      w_off = (datum_width - crop_width) / 2;
     }
   }
 
@@ -140,12 +147,18 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   CHECK_GE(num, 1);
 
   const int crop_size = param_.crop_size();
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
 
-  if (crop_size) {
-    CHECK_EQ(crop_size, height);
-    CHECK_EQ(crop_size, width);
+  if (crop_height) {
+    CHECK_EQ(crop_height, height);
   } else {
     CHECK_EQ(datum_height, height);
+  }
+
+  if (crop_width) {
+    CHECK_EQ(crop_width, width);
+  } else {
     CHECK_EQ(datum_width, width);
   }
 
@@ -213,14 +226,17 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   CHECK(cv_img.depth() == CV_8U) << "Image data type must be unsigned byte";
 
   const int crop_size = param_.crop_size();
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
   const bool has_mean_file = param_.has_mean_file();
   const bool has_mean_values = mean_values_.size() > 0;
 
   CHECK_GT(img_channels, 0);
-  CHECK_GE(img_height, crop_size);
-  CHECK_GE(img_width, crop_size);
+  CHECK_GE(img_height, crop_height);
+  CHECK_GE(img_width, crop_width);
 
   Dtype* mean = NULL;
   if (has_mean_file) {
@@ -243,18 +259,25 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   int h_off = 0;
   int w_off = 0;
   cv::Mat cv_cropped_img = cv_img;
-  if (crop_size) {
-    CHECK_EQ(crop_size, height);
-    CHECK_EQ(crop_size, width);
-    // We only do random crop when we do training.
+  if (crop_height) {
+    CHECK_EQ(crop_height, height);
     if (phase_ == TRAIN) {
-      h_off = Rand(img_height - crop_size + 1);
-      w_off = Rand(img_width - crop_size + 1);
+      h_off = Rand(img_height - crop_height + 1);
     } else {
-      h_off = (img_height - crop_size) / 2;
-      w_off = (img_width - crop_size) / 2;
+      h_off = (img_height - crop_height) / 2;
     }
-    cv::Rect roi(w_off, h_off, crop_size, crop_size);
+  }
+  if (crop_width) {
+    CHECK_EQ(crop_width, width);
+    if (phase_ == TRAIN) {
+      w_off = Rand(img_width - crop_width + 1);
+    } else {
+      w_off = (img_width - crop_width) / 2;
+    }
+  }
+
+  if (crop_height || crop_width) {
+    cv::Rect roi(w_off, h_off, height, width);
     cv_cropped_img = cv_img(roi);
   } else {
     CHECK_EQ(img_height, height);
@@ -314,6 +337,9 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
   CHECK_GE(input_width, width);
 
   const int crop_size = param_.crop_size();
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
   const bool has_mean_file = param_.has_mean_file();
@@ -321,18 +347,24 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
 
   int h_off = 0;
   int w_off = 0;
-  if (crop_size) {
-    CHECK_EQ(crop_size, height);
-    CHECK_EQ(crop_size, width);
-    // We only do random crop when we do training.
+  if (crop_height) {
+    CHECK_EQ(crop_height, height);
     if (phase_ == TRAIN) {
-      h_off = Rand(input_height - crop_size + 1);
-      w_off = Rand(input_width - crop_size + 1);
+      h_off = Rand(input_height - crop_height + 1);
     } else {
-      h_off = (input_height - crop_size) / 2;
-      w_off = (input_width - crop_size) / 2;
+      h_off = (input_height - crop_height) / 2;
     }
-  } else {
+  }
+  if (crop_width) {
+    CHECK_EQ(crop_width, width);
+    if (phase_ == TRAIN) {
+      w_off = Rand(input_width - crop_width + 1);
+    } else {
+      w_off = (input_width - crop_width) / 2;
+    }
+  }
+
+  if (crop_height == 0 && crop_width == 0) {
     CHECK_EQ(input_height, height);
     CHECK_EQ(input_width, width);
   }
@@ -397,8 +429,8 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
 
 template <typename Dtype>
 void DataTransformer<Dtype>::InitRand() {
-  const bool needs_rand = param_.mirror() ||
-      (phase_ == TRAIN && param_.crop_size());
+  const bool needs_rand = param_.mirror() || (phase_ == TRAIN &&
+      (param_.crop_size() || param_.crop_height() || param_.crop_width()));
   if (needs_rand) {
     const unsigned int rng_seed = caffe_rng_rand();
     rng_.reset(new Caffe::RNG(rng_seed));

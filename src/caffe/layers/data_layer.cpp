@@ -59,12 +59,17 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   }
   // image
   int crop_size = this->layer_param_.transform_param().crop_size();
-  if (crop_size > 0) {
+  int crop_height = this->layer_param_.transform_param().crop_height() > 0 ?
+      this->layer_param_.transform_param().crop_height() : crop_size;
+  int crop_width = this->layer_param_.transform_param().crop_width() > 0 ?
+      this->layer_param_.transform_param().crop_width() : crop_size;
+
+  if (crop_height || crop_width) {
     top[0]->Reshape(this->layer_param_.data_param().batch_size(),
-        datum.channels(), crop_size, crop_size);
+        datum.channels(), crop_height, crop_width);
     this->prefetch_data_.Reshape(this->layer_param_.data_param().batch_size(),
-        datum.channels(), crop_size, crop_size);
-    this->transformed_data_.Reshape(1, datum.channels(), crop_size, crop_size);
+        datum.channels(), crop_height, crop_width);
+    this->transformed_data_.Reshape(1, datum.channels(), crop_height, crop_width);
   } else {
     top[0]->Reshape(
         this->layer_param_.data_param().batch_size(), datum.channels(),
@@ -99,8 +104,12 @@ void DataLayer<Dtype>::InternalThreadEntry() {
   // Reshape on single input batches for inputs of varying dimension.
   const int batch_size = this->layer_param_.data_param().batch_size();
   const int crop_size = this->layer_param_.transform_param().crop_size();
+  int crop_height = this->layer_param_.transform_param().crop_height() > 0 ?
+        this->layer_param_.transform_param().crop_height() : crop_size;
+  int crop_width = this->layer_param_.transform_param().crop_width() > 0 ?
+        this->layer_param_.transform_param().crop_width() : crop_size;
   bool force_color = this->layer_param_.data_param().force_encoded_color();
-  if (batch_size == 1 && crop_size == 0) {
+  if (batch_size == 1 && crop_height == 0 && crop_width) {
     Datum datum;
     datum.ParseFromString(cursor_->value());
     if (datum.encoded()) {
