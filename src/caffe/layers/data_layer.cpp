@@ -16,6 +16,7 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/rng.hpp"
+#include "caffe/util/mpi_templates.hpp"
 
 namespace caffe {
 
@@ -38,7 +39,7 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     skip = caffe_rng_rand() % this->layer_param_.data_param().rand_skip();
   }
 #ifdef USE_MPI
-  MPI_Bcast(&skip, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  MPIBcast<unsigned int>(1, &skip);
   skip += this->layer_param_.data_param().batch_size() * Caffe::mpi_rank();
 #endif
   LOG(INFO) << "Skipping first " << skip << " data points.";

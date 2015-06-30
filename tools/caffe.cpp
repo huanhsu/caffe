@@ -234,7 +234,7 @@ int test() {
   }
   loss /= FLAGS_iterations;
 #ifdef USE_MPI
-  MPI_Allreduce(MPI_IN_PLACE, &loss, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+  MPIAllreduce<float>(1, MPI_IN_PLACE, &loss, MPI_SUM);
   loss /= Caffe::mpi_size();
 #endif
   LOG(INFO) << "Loss: " << loss;
@@ -246,7 +246,7 @@ int test() {
     std::ostringstream loss_msg_stream;
     float mean_score = test_score[i] / FLAGS_iterations;
 #ifdef USE_MPI
-    MPI_Allreduce(MPI_IN_PLACE, &mean_score, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+    MPIAllreduce<float>(1, MPI_IN_PLACE, &mean_score, MPI_SUM);
     mean_score /= Caffe::mpi_size();
 #endif
     if (loss_weight) {
@@ -344,8 +344,7 @@ int time() {
       timer.Start();
       for (int j = 0; j < blobs.size(); ++j) {
         if (Caffe::mpi_size() == 1) continue;
-        MPI_Allreduce(MPI_IN_PLACE, blobs[j]->mutable_cpu_diff(),
-                      blobs[j]->count(), MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+        MPIAllreduce<float>(blobs[j]->count(), MPI_IN_PLACE, blobs[j]->mutable_cpu_diff(), MPI_SUM);
         caffe_scal(blobs[j]->count(), 1.0f / Caffe::mpi_size(),
                    blobs[j]->mutable_cpu_diff());
       }

@@ -13,62 +13,46 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
+#include "caffe/util/mpi_templates.hpp"
 
 namespace caffe {
 
 #ifdef USE_MPI
 // Average losses across all the MPI processors.
-static void g_average_losses(float* loss) {
+template <typename Dtype>
+static void g_average_loss(Dtype* loss) {
   if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, loss, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-  (*loss) /= Caffe::mpi_size();
-}
-static void g_average_losses(double* loss) {
-  if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, loss, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPIAllreduce<Dtype>(1, MPI_IN_PLACE, loss, MPI_SUM);
   (*loss) /= Caffe::mpi_size();
 }
 
 // Average blob data across all the MPI processors.
-static void g_average_data(Blob<float>* blob) {
+template <typename Dtype>
+static void g_average_cpu_data(Blob<Dtype>* blob) {
   if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_data(), blob->count(),
-                MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-  caffe_scal(blob->count(), 1.0f / Caffe::mpi_size(), blob->mutable_cpu_data());
-}
-static void g_average_data(Blob<double>* blob) {
-  if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_data(), blob->count(),
-                MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  caffe_scal(blob->count(), 1.0 / Caffe::mpi_size(), blob->mutable_cpu_data());
+  MPIAllreduce<Dtype>(blob->count(), MPI_IN_PLACE,
+      blob->mutable_cpu_data(), MPI_SUM);
+  caffe_scal(blob->count(), Dtype(1.) / Caffe::mpi_size(),
+      blob->mutable_cpu_data());
 }
 
 // Average blob diffs across all the MPI processors.
-static void g_average_cpu_diffs(const shared_ptr<Blob<float> >& blob) {
+template <typename Dtype>
+static void g_average_cpu_diff(const shared_ptr<Blob<Dtype> >& blob) {
   if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
-                MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-  caffe_scal(blob->count(), 1.0f / Caffe::mpi_size(), blob->mutable_cpu_diff());
+  MPIAllreduce<Dtype>(blob->count(), MPI_IN_PLACE,
+      blob->mutable_cpu_diff(), MPI_SUM);
+  caffe_scal(blob->count(), Dtype(1.) / Caffe::mpi_size(),
+      blob->mutable_cpu_diff());
 }
-static void g_average_gpu_diffs(const shared_ptr<Blob<float> >& blob) {
+
+template <typename Dtype>
+static void g_average_gpu_diff(const shared_ptr<Blob<Dtype> >& blob) {
   if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
-                MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-  caffe_gpu_scal(blob->count(), 1.0f / Caffe::mpi_size(),
-                 blob->mutable_gpu_diff());
-}
-static void g_average_cpu_diffs(const shared_ptr<Blob<double> >& blob) {
-  if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
-                MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  caffe_scal(blob->count(), 1.0 / Caffe::mpi_size(), blob->mutable_cpu_diff());
-}
-static void g_average_gpu_diffs(const shared_ptr<Blob<double> >& blob) {
-  if (Caffe::mpi_size() == 1) return;
-  MPI_Allreduce(MPI_IN_PLACE, blob->mutable_cpu_diff(), blob->count(),
-                MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  caffe_gpu_scal(blob->count(), 1.0 / Caffe::mpi_size(),
-                 blob->mutable_gpu_diff());
+  MPIAllreduce<Dtype>(blob->count(), MPI_IN_PLACE,
+      blob->mutable_cpu_diff(), MPI_SUM);
+  caffe_gpu_scal(blob->count(), Dtype(1.) / Caffe::mpi_size(),
+      blob->mutable_gpu_diff());
 }
 #endif
 
@@ -262,13 +246,12 @@ void Solver<Dtype>::Step(int iters) {
     // accumulate the loss and gradient
     Dtype loss = 0;
     for (int i = 0; i < param_.iter_size(); ++i) {
-      Dtype tmp = net_->ForwardBackward(bottom_vec);
-#ifdef USE_MPI
-      g_average_losses(&tmp);
-#endif
-      loss += tmp;
+      loss += net_->ForwardBackward(bottom_vec);
     }
     loss /= param_.iter_size();
+#ifdef USE_MPI
+    g_average_loss(&loss);
+#endif
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {
       losses.push_back(loss);
@@ -285,7 +268,7 @@ void Solver<Dtype>::Step(int iters) {
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
 #ifdef USE_MPI
-        g_average_data(result[j]);
+        g_average_cpu_data(result[j]);
 #endif
         const Dtype* result_vec = result[j]->cpu_data();
         const string& output_name =
@@ -344,10 +327,10 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   // display the loss, which is computed in the forward pass.
   if (param_.display() && iter_ % param_.display() == 0) {
     Dtype loss;
-#ifdef USE_MPI
-    g_average_losses(&loss);
-#endif
     net_->ForwardPrefilled(&loss);
+#ifdef USE_MPI
+    g_average_loss(&loss);
+#endif
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
@@ -402,7 +385,7 @@ void Solver<Dtype>::Test(const int test_net_id) {
   if (param_.test_compute_loss()) {
     loss /= param_.test_iter(test_net_id);
 #ifdef USE_MPI
-    g_average_losses(&loss);
+    g_average_loss(&loss);
 #endif
     LOG(INFO) << "Test loss: " << loss;
   }
@@ -414,7 +397,7 @@ void Solver<Dtype>::Test(const int test_net_id) {
     ostringstream loss_msg_stream;
     Dtype mean_score = test_score[i] / param_.test_iter(test_net_id);
 #ifdef USE_MPI
-    g_average_losses(&mean_score);
+    g_average_loss(&mean_score);
 #endif
     if (loss_weight) {
       loss_msg_stream << " (* " << loss_weight
@@ -567,6 +550,29 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
   }
+
+#ifdef USE_MPI
+  const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
+  for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
+    switch (Caffe::mode()) {
+    case Caffe::CPU: {
+      g_average_cpu_diff(net_params[param_id]);
+      break;
+    }
+    case Caffe::GPU: {
+#ifndef CPU_ONLY
+      g_average_gpu_diff(net_params[param_id]);
+#else
+      NO_GPU
+#endif
+      break;
+    }
+    default:
+      LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+    }
+  }
+#endif
+
   ClipGradients();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
     Normalize(param_id);
@@ -612,9 +618,6 @@ void SGDSolver<Dtype>::Regularize(int param_id) {
   Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
   switch (Caffe::mode()) {
   case Caffe::CPU: {
-#ifdef USE_MPI
-    g_average_cpu_diffs(net_params[param_id]);
-#endif
     if (local_decay) {
       if (regularization_type == "L2") {
         // add weight decay
@@ -638,9 +641,6 @@ void SGDSolver<Dtype>::Regularize(int param_id) {
   }
   case Caffe::GPU: {
 #ifndef CPU_ONLY
-#ifdef USE_MPI
-    g_average_gpu_diffs(net_params[param_id]);
-#endif
     if (local_decay) {
       if (regularization_type == "L2") {
         // add weight decay
@@ -733,9 +733,6 @@ void NesterovSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   Dtype local_rate = rate * net_params_lr[param_id];
   switch (Caffe::mode()) {
   case Caffe::CPU: {
-#ifdef USE_MPI
-    g_average_cpu_diffs(net_params[param_id]);
-#endif
     // save history momentum for stepping back
     caffe_copy(net_params[param_id]->count(),
         this->history_[param_id]->cpu_data(),
@@ -759,9 +756,6 @@ void NesterovSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   }
   case Caffe::GPU: {
 #ifndef CPU_ONLY
-#ifdef USE_MPI
-    g_average_gpu_diffs(net_params[param_id]);
-#endif
     // save history momentum for stepping back
     caffe_copy(net_params[param_id]->count(),
         this->history_[param_id]->gpu_data(),
@@ -799,9 +793,6 @@ void AdaGradSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   Dtype local_rate = rate * net_params_lr[param_id];
   switch (Caffe::mode()) {
   case Caffe::CPU: {
-#ifdef USE_MPI
-    g_average_cpu_diffs(net_params[param_id]);
-#endif
     // compute square of gradient in update
     caffe_powx(net_params[param_id]->count(),
         net_params[param_id]->cpu_diff(), Dtype(2),
@@ -834,9 +825,6 @@ void AdaGradSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   }
   case Caffe::GPU: {
 #ifndef CPU_ONLY
-#ifdef USE_MPI
-    g_average_gpu_diffs(net_params[param_id]);
-#endif
     // compute square of gradient in update
     caffe_gpu_powx(net_params[param_id]->count(),
         net_params[param_id]->gpu_diff(), Dtype(2),
