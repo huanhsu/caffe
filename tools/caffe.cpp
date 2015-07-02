@@ -2,15 +2,14 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <set>
 #include <map>
 #include <string>
 #include <vector>
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
 
 #include "boost/algorithm/string.hpp"
 #include "caffe/caffe.hpp"
+#include "caffe/util/mpi_templates.hpp"
 
 using caffe::Blob;
 using caffe::Caffe;
@@ -233,10 +232,6 @@ int test() {
     }
   }
   loss /= FLAGS_iterations;
-#ifdef USE_MPI
-  MPIAllreduce<float>(1, MPI_IN_PLACE, &loss, MPI_SUM);
-  loss /= Caffe::mpi_size();
-#endif
   LOG(INFO) << "Loss: " << loss;
   for (int i = 0; i < test_score.size(); ++i) {
     const std::string& output_name = caffe_net.blob_names()[
@@ -245,10 +240,6 @@ int test() {
         caffe_net.output_blob_indices()[test_score_output_id[i]]];
     std::ostringstream loss_msg_stream;
     float mean_score = test_score[i] / FLAGS_iterations;
-#ifdef USE_MPI
-    MPIAllreduce<float>(1, MPI_IN_PLACE, &mean_score, MPI_SUM);
-    mean_score /= Caffe::mpi_size();
-#endif
     if (loss_weight) {
       loss_msg_stream << " (* " << loss_weight
                       << " = " << loss_weight * mean_score << " loss)";
@@ -305,6 +296,7 @@ int time() {
   const vector<vector<Blob<float>*> >& top_vecs = caffe_net.top_vecs();
   const vector<vector<bool> >& bottom_need_backward =
       caffe_net.bottom_need_backward();
+  const std::set<std::string>& serial_layers = caffe_net.serial_layers();
   LOG(INFO) << "*** Benchmark begins ***";
   LOG(INFO) << "Testing for " << FLAGS_iterations << " iterations.";
   Timer total_timer;
@@ -340,13 +332,19 @@ int time() {
 #ifdef USE_MPI
     comm_timer.Start();
     for (int i = layers.size() - 1; i >= 0; --i) {
+      if (serial_layers.find(layers[i]->layer_param().name()) !=
+          serial_layers.end()) {
+        comm_time_per_layer[i] = 0;
+        continue;
+      }
       const vector<shared_ptr<Blob<float> > >& blobs = layers[i]->blobs();
       timer.Start();
       for (int j = 0; j < blobs.size(); ++j) {
         if (Caffe::mpi_size() == 1) continue;
-        MPIAllreduce<float>(blobs[j]->count(), MPI_IN_PLACE, blobs[j]->mutable_cpu_diff(), MPI_SUM);
+        MPIAllreduce<float>(blobs[j]->count(), MPI_IN_PLACE,
+            blobs[j]->mutable_cpu_diff(), MPI_SUM);
         caffe_scal(blobs[j]->count(), 1.0f / Caffe::mpi_size(),
-                   blobs[j]->mutable_cpu_diff());
+            blobs[j]->mutable_cpu_diff());
       }
       comm_time_per_layer[i] += timer.MicroSeconds();
     }

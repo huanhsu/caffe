@@ -3,9 +3,6 @@
 #include <algorithm>
 #include <string>
 #include <vector>
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
 
 #include "caffe/net.hpp"
 #include "caffe/proto/caffe.pb.h"
@@ -16,45 +13,6 @@
 #include "caffe/util/mpi_templates.hpp"
 
 namespace caffe {
-
-#ifdef USE_MPI
-// Average losses across all the MPI processors.
-template <typename Dtype>
-static void g_average_loss(Dtype* loss) {
-  if (Caffe::mpi_size() == 1) return;
-  MPIAllreduce<Dtype>(1, MPI_IN_PLACE, loss, MPI_SUM);
-  (*loss) /= Caffe::mpi_size();
-}
-
-// Average blob data across all the MPI processors.
-template <typename Dtype>
-static void g_average_cpu_data(Blob<Dtype>* blob) {
-  if (Caffe::mpi_size() == 1) return;
-  MPIAllreduce<Dtype>(blob->count(), MPI_IN_PLACE,
-      blob->mutable_cpu_data(), MPI_SUM);
-  caffe_scal(blob->count(), Dtype(1.) / Caffe::mpi_size(),
-      blob->mutable_cpu_data());
-}
-
-// Average blob diffs across all the MPI processors.
-template <typename Dtype>
-static void g_average_cpu_diff(const shared_ptr<Blob<Dtype> >& blob) {
-  if (Caffe::mpi_size() == 1) return;
-  MPIAllreduce<Dtype>(blob->count(), MPI_IN_PLACE,
-      blob->mutable_cpu_diff(), MPI_SUM);
-  caffe_scal(blob->count(), Dtype(1.) / Caffe::mpi_size(),
-      blob->mutable_cpu_diff());
-}
-
-template <typename Dtype>
-static void g_average_gpu_diff(const shared_ptr<Blob<Dtype> >& blob) {
-  if (Caffe::mpi_size() == 1) return;
-  MPIAllreduce<Dtype>(blob->count(), MPI_IN_PLACE,
-      blob->mutable_cpu_diff(), MPI_SUM);
-  caffe_gpu_scal(blob->count(), Dtype(1.) / Caffe::mpi_size(),
-      blob->mutable_gpu_diff());
-}
-#endif
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param)
@@ -249,9 +207,6 @@ void Solver<Dtype>::Step(int iters) {
       loss += net_->ForwardBackward(bottom_vec);
     }
     loss /= param_.iter_size();
-#ifdef USE_MPI
-    g_average_loss(&loss);
-#endif
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {
       losses.push_back(loss);
@@ -267,9 +222,8 @@ void Solver<Dtype>::Step(int iters) {
       const vector<Blob<Dtype>*>& result = net_->output_blobs();
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
-#ifdef USE_MPI
-        g_average_cpu_data(result[j]);
-#endif
+        /// TODO: Check whether the result is an output of a parallel layer.
+        /// If so, average across MPI processes.
         const Dtype* result_vec = result[j]->cpu_data();
         const string& output_name =
             net_->blob_names()[net_->output_blob_indices()[j]];
@@ -328,9 +282,6 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   if (param_.display() && iter_ % param_.display() == 0) {
     Dtype loss;
     net_->ForwardPrefilled(&loss);
-#ifdef USE_MPI
-    g_average_loss(&loss);
-#endif
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
@@ -384,9 +335,6 @@ void Solver<Dtype>::Test(const int test_net_id) {
   }
   if (param_.test_compute_loss()) {
     loss /= param_.test_iter(test_net_id);
-#ifdef USE_MPI
-    g_average_loss(&loss);
-#endif
     LOG(INFO) << "Test loss: " << loss;
   }
   for (int i = 0; i < test_score.size(); ++i) {
@@ -396,9 +344,6 @@ void Solver<Dtype>::Test(const int test_net_id) {
     const Dtype loss_weight = test_net->blob_loss_weights()[output_blob_index];
     ostringstream loss_msg_stream;
     Dtype mean_score = test_score[i] / param_.test_iter(test_net_id);
-#ifdef USE_MPI
-    g_average_loss(&mean_score);
-#endif
     if (loss_weight) {
       loss_msg_stream << " (* " << loss_weight
                       << " = " << loss_weight * mean_score << " loss)";
@@ -552,24 +497,18 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   }
 
 #ifdef USE_MPI
+  // Accumulate and average the gradients of parameters of parallel layers.
   const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
+  const vector<shared_ptr<Layer<Dtype> > >& net_layers = this->net_->layers();
+  const vector<pair<int, int> >& param_layer_indices =
+      this->net_->param_layer_indices();
+  const set<string>& serial_layers = this->net_->serial_layers();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
-    switch (Caffe::mode()) {
-    case Caffe::CPU: {
-      g_average_cpu_diff(net_params[param_id]);
-      break;
-    }
-    case Caffe::GPU: {
-#ifndef CPU_ONLY
-      g_average_gpu_diff(net_params[param_id]);
-#else
-      NO_GPU
-#endif
-      break;
-    }
-    default:
-      LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
-    }
+    const int layer_id = param_layer_indices[param_id].first;
+    const string& layer_name = net_layers[layer_id]->layer_param().name();
+    if (serial_layers.find(layer_name) != serial_layers.end()) continue;
+    MPIAllreduce<Dtype>(net_params[param_id]->count(), MPI_IN_PLACE,
+        net_params[param_id]->mutable_cpu_diff(), MPI_SUM);
   }
 #endif
 
