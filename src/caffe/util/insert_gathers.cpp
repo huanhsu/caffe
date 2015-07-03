@@ -32,7 +32,10 @@ void InsertGathers(const set<string>& serial_layers, NetParameter* param) {
     // First insert all the needed gather layers, then the upper layer, to make
     // all the layers topo-ordered.
     vector<pair<int, string> > update_bottoms;
-    for (int j = 0; j < i; ++j) {
+    // There are some layers handling some blobs in-place. We use a reverse
+    // for-loop to find the nearest layer.
+    set<string> blobs_used;
+    for (int j = i - 1; j >= 0; --j) {
       const LayerParameter& layer_down = param->layer(j);
       if (serial_layers.find(layer_down.name()) != serial_layers.end())
           continue;
@@ -41,8 +44,10 @@ void InsertGathers(const set<string>& serial_layers, NetParameter* param) {
       vector<pair<int, string> > connecting_blobs;
       for (int k = 0; k < layer_up.bottom_size(); ++k) {
         const string& name = layer_up.bottom(k);
+        if (blobs_used.find(name) != blobs_used.end()) continue;
         if (tops.find(name) != tops.end()) {
           connecting_blobs.push_back(make_pair(k, name));
+          blobs_used.insert(name);
         }
       }
       if (connecting_blobs.empty()) continue;
