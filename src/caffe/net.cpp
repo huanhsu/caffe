@@ -4,9 +4,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
 
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
@@ -16,6 +13,8 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
+#include "caffe/util/mpi_templates.hpp"
+#include "caffe/util/insert_gathers.hpp"
 
 #include "caffe/test/test_caffe_main.hpp"
 
@@ -47,6 +46,12 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   // Create a copy of filtered_param with splits added where necessary.
   NetParameter param;
   InsertSplits(filtered_param, &param);
+#ifdef USE_MPI
+  // Determine which layers should be in parallel and insert a MPIGatherLayer
+  // properly.
+  DetermineLayerParallelOrSerial(param);
+  InsertGathers(serial_layers_, &param);
+#endif
   // Basically, build all the layers and set up their connections.
   name_ = param.name();
   map<string, int> blob_name_to_idx;
@@ -776,34 +781,6 @@ void Net<Dtype>::ToProto(NetParameter* param, bool write_diff) const {
   }
 }
 
-#ifdef USE_MPI
-template<>
-void Net<float>::SyncLayers() {
-  for (int i = 0; i < layers_.size(); ++i) {
-    vector<shared_ptr<Blob<float> > >& blobs = layers_[i]->blobs();
-    for (int j = 0; j < blobs.size(); ++j) {
-      MPI_Bcast(blobs[j]->mutable_cpu_data(), blobs[j]->count(), MPI_FLOAT,
-                0, MPI_COMM_WORLD);
-      MPI_Bcast(blobs[j]->mutable_cpu_diff(), blobs[j]->count(), MPI_FLOAT,
-                0, MPI_COMM_WORLD);
-    }
-  }
-}
-
-template<>
-void Net<double>::SyncLayers() {
-  for (int i = 0; i < layers_.size(); ++i) {
-    vector<shared_ptr<Blob<double> > >& blobs = layers_[i]->blobs();
-    for (int j = 0; j < blobs.size(); ++j) {
-      MPI_Bcast(blobs[j]->mutable_cpu_data(), blobs[j]->count(), MPI_DOUBLE,
-                0, MPI_COMM_WORLD);
-      MPI_Bcast(blobs[j]->mutable_cpu_diff(), blobs[j]->count(), MPI_DOUBLE,
-                0, MPI_COMM_WORLD);
-    }
-  }
-}
-#endif
-
 template <typename Dtype>
 void Net<Dtype>::Update() {
   // First, accumulate the diffs of any shared parameters into their owner's
@@ -877,6 +854,80 @@ const shared_ptr<Layer<Dtype> > Net<Dtype>::layer_by_name(
   }
   return layer_ptr;
 }
+
+#ifdef USE_MPI
+template <typename Dtype>
+void Net<Dtype>::SyncLayers() {
+  for (int i = 0; i < layers_.size(); ++i) {
+    vector<shared_ptr<Blob<Dtype> > >& blobs = layers_[i]->blobs();
+    for (int j = 0; j < blobs.size(); ++j) {
+      MPIBcast<Dtype>(blobs[j]->count(), blobs[j]->mutable_cpu_data());
+      MPIBcast<Dtype>(blobs[j]->count(), blobs[j]->mutable_cpu_diff());
+    }
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::DetermineLayerParallelOrSerial(const NetParameter& param) {
+  serial_layers_.clear();
+  int num_layers = param.layer_size();
+  // First pass: set serial according to the layer type.
+  for (int i = 0; i < num_layers; ++i) {
+    const LayerParameter& layer_param = param.layer(i);
+    const string& layer_type = layer_param.type();
+    const string& layer_name = layer_param.name();
+    if (layer_type == "InnerProduct" ||
+        layer_type == "SoftmaxWithLoss" ||
+        layer_type == "EuclideanLoss" ||
+        layer_type == "HingeLoss" ||
+        layer_type == "SigmoidCrossEntropyLoss" ||
+        layer_type == "InfogainLoss" ||
+        layer_type == "Accuracy") {
+      serial_layers_.insert(layer_name);
+    }
+  }
+  // Build the DAG
+  vector<set<string> > layer_bottoms(num_layers);
+  vector<set<string> > layer_tops(num_layers);
+  for (int i = 0; i < num_layers; ++i) {
+    const LayerParameter& layer_param = param.layer(i);
+    for (int j = 0; j < layer_param.bottom_size(); ++j) {
+      layer_bottoms[i].insert(layer_param.bottom(j));
+    }
+    for (int j = 0; j < layer_param.top_size(); ++j) {
+      layer_tops[i].insert(layer_param.top(j));
+    }
+  }
+  vector<vector<string> > layer_parents(num_layers);
+  for (int i = 0; i < num_layers; ++i) {
+    const set<string>& bottoms = layer_bottoms[i];
+    for (int j = 0; j < i; ++j) {
+      const set<string>& tops = layer_tops[j];
+      for (set<string>::const_iterator it = bottoms.begin();
+          it != bottoms.end(); ++it) {
+        if (tops.find(*it) != tops.end()) {
+          layer_parents[i].push_back(param.layer(j).name());
+          break;
+        }
+      }
+    }
+  }
+  // Second pass: propogate the flag in every subtree.
+  // If a node is set as serial, then all its children are set to be serial.
+  for (int i = 0; i < num_layers; ++i) {
+    const string& layer_name = param.layer(i).name();
+    if (serial_layers_.find(layer_name) != serial_layers_.end()) continue;
+    const vector<string>& parents = layer_parents[i];
+    for (int j = 0; j < parents.size(); ++j) {
+      if (serial_layers_.find(parents[j]) != serial_layers_.end()) {
+        serial_layers_.insert(layer_name);
+        break;
+      }
+    }
+  }
+}
+
+#endif
 
 INSTANTIATE_CLASS(Net);
 

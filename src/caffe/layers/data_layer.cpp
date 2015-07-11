@@ -4,9 +4,6 @@
 
 #include <string>
 #include <vector>
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
 
 #include "caffe/common.hpp"
 #include "caffe/data_layers.hpp"
@@ -16,6 +13,7 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/rng.hpp"
+#include "caffe/util/mpi_templates.hpp"
 
 namespace caffe {
 
@@ -27,6 +25,15 @@ DataLayer<Dtype>::~DataLayer<Dtype>() {
 template <typename Dtype>
 void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
+#ifdef USE_MPI
+  const int batch_size = this->layer_param_.data_param().batch_size();
+  if (batch_size % Caffe::mpi_size() != 0) {
+    LOG(FATAL) << "Batch size (" << batch_size << ") should be divisible by "
+                  "the number of MPI processes (" << Caffe::mpi_size() << ")";
+  }
+  this->layer_param_.mutable_data_param()->set_batch_size(
+      batch_size / Caffe::mpi_size());
+#endif
   // Initialize DB
   db_.reset(db::GetDB(this->layer_param_.data_param().backend()));
   db_->Open(this->layer_param_.data_param().source(), db::READ);
@@ -38,7 +45,7 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     skip = caffe_rng_rand() % this->layer_param_.data_param().rand_skip();
   }
 #ifdef USE_MPI
-  MPI_Bcast(&skip, 1, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
+  MPIBcast<unsigned int>(1, &skip);
   skip += this->layer_param_.data_param().batch_size() * Caffe::mpi_rank();
 #endif
   LOG(INFO) << "Skipping first " << skip << " data points.";
@@ -48,9 +55,16 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       cursor_->SeekToFirst();
     }
   }
-  // Read a data point, and use it to initialize the top blob.
+  // Read a data point, to initialize the prefetch and top blobs.
   Datum datum;
   datum.ParseFromString(cursor_->value());
+  // Use data_transformer to infer the expected blob shape from datum.
+  vector<int> top_shape = this->data_transformer_->InferBlobShape(datum);
+  this->transformed_data_.Reshape(top_shape);
+  // Reshape top[0] and prefetch_data according to the batch_size.
+  top_shape[0] = this->layer_param_.data_param().batch_size();
+  this->prefetch_data_.Reshape(top_shape);
+  top[0]->ReshapeLike(this->prefetch_data_);
 
   bool force_color = this->layer_param_.data_param().force_encoded_color();
   if ((force_color && DecodeDatum(&datum, true)) ||
@@ -101,29 +115,17 @@ void DataLayer<Dtype>::InternalThreadEntry() {
   CHECK(this->prefetch_data_.count());
   CHECK(this->transformed_data_.count());
 
-  // Reshape on single input batches for inputs of varying dimension.
+  // Reshape according to the first datum of each batch
+  // on single input batches allows for inputs of varying dimension.
   const int batch_size = this->layer_param_.data_param().batch_size();
-  const int crop_size = this->layer_param_.transform_param().crop_size();
-  int crop_height = this->layer_param_.transform_param().crop_height() > 0 ?
-        this->layer_param_.transform_param().crop_height() : crop_size;
-  int crop_width = this->layer_param_.transform_param().crop_width() > 0 ?
-        this->layer_param_.transform_param().crop_width() : crop_size;
-  bool force_color = this->layer_param_.data_param().force_encoded_color();
-  if (batch_size == 1 && crop_height == 0 && crop_width) {
-    Datum datum;
-    datum.ParseFromString(cursor_->value());
-    if (datum.encoded()) {
-      if (force_color) {
-        DecodeDatum(&datum, true);
-      } else {
-        DecodeDatumNative(&datum);
-      }
-    }
-    this->prefetch_data_.Reshape(1, datum.channels(),
-        datum.height(), datum.width());
-    this->transformed_data_.Reshape(1, datum.channels(),
-        datum.height(), datum.width());
-  }
+  Datum datum;
+  datum.ParseFromString(cursor_->value());
+  // Use data_transformer to infer the expected blob shape from datum.
+  vector<int> top_shape = this->data_transformer_->InferBlobShape(datum);
+  this->transformed_data_.Reshape(top_shape);
+  // Reshape prefetch_data according to the batch_size.
+  top_shape[0] = batch_size;
+  this->prefetch_data_.Reshape(top_shape);
 
   Dtype* top_data = this->prefetch_data_.mutable_cpu_data();
   Dtype* top_label = NULL;  // suppress warnings about uninitialized variables
@@ -131,42 +133,24 @@ void DataLayer<Dtype>::InternalThreadEntry() {
   if (this->output_labels_) {
     top_label = this->prefetch_label_.mutable_cpu_data();
   }
+  timer.Start();
   for (int item_id = 0; item_id < batch_size; ++item_id) {
-    timer.Start();
-    // get a blob
+    // get a datum
     Datum datum;
     datum.ParseFromString(cursor_->value());
-
-    cv::Mat cv_img;
-    if (datum.encoded()) {
-      if (force_color) {
-        cv_img = DecodeDatumToCVMat(datum, true);
-      } else {
-        cv_img = DecodeDatumToCVMatNative(datum);
-      }
-      if (cv_img.channels() != this->transformed_data_.channels()) {
-        LOG(WARNING) << "Your dataset contains encoded images with mixed "
-        << "channel sizes. Consider adding a 'force_color' flag to the "
-        << "model definition, or rebuild your dataset using "
-        << "convert_imageset.";
-      }
-    }
     read_time += timer.MicroSeconds();
     timer.Start();
-
     // Apply data transformations (mirror, scale, crop...)
     int offset = this->prefetch_data_.offset(item_id);
     this->transformed_data_.set_cpu_data(top_data + offset);
-    if (datum.encoded()) {
-      this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
-    } else {
-      this->data_transformer_->Transform(datum, &(this->transformed_data_));
-    }
+    this->data_transformer_->Transform(datum, &(this->transformed_data_));
+    // Copy label.
     if (this->output_labels_) {
       top_label[item_id] = datum.label();
     }
     trans_time += timer.MicroSeconds();
-    // go to the next iter
+    timer.Start();
+    // go to the next item.
     cursor_->Next();
     if (!cursor_->valid()) {
       DLOG(INFO) << "Restarting data prefetching from start.";
@@ -181,6 +165,7 @@ void DataLayer<Dtype>::InternalThreadEntry() {
     }
   }
 #endif
+  timer.Stop();
   batch_timer.Stop();
   DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
   DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
