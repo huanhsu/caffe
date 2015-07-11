@@ -296,7 +296,6 @@ int time() {
   const vector<vector<Blob<float>*> >& top_vecs = caffe_net.top_vecs();
   const vector<vector<bool> >& bottom_need_backward =
       caffe_net.bottom_need_backward();
-  const std::set<std::string>& serial_layers = caffe_net.serial_layers();
   LOG(INFO) << "*** Benchmark begins ***";
   LOG(INFO) << "Testing for " << FLAGS_iterations << " iterations.";
   Timer total_timer;
@@ -310,7 +309,10 @@ int time() {
   std::vector<double> comm_time_per_layer(layers.size(), 0.0);
   double forward_time = 0.0;
   double backward_time = 0.0;
+#ifdef USE_MPI
+  const std::set<std::string>& serial_layers = caffe_net.serial_layers();
   double comm_time = 0.0;
+#endif
   for (int j = 0; j < FLAGS_iterations; ++j) {
     Timer iter_timer;
     iter_timer.Start();
