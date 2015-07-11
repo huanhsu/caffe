@@ -7,7 +7,7 @@ layer { name: "data" type: "Data" top: "data" top: "label"
   include { phase: TRAIN } }
 layer { name: "data" type: "Data" top: "data" top: "label"
   transform_param { mirror: false crop_size: 224 mean_value: 104 mean_value: 117 mean_value: 123 }
-  data_param { source: "examples/imagenet/ilsvrc12_val_lmdb" batch_size: 25 backend: LMDB }
+  data_param { source: "examples/imagenet/ilsvrc12_val_lmdb" batch_size: 50 backend: LMDB }
   include { phase: TEST } }
 
 ####################################### conv1 #######################################

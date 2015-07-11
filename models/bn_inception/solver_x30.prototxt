@@ -1,5 +1,5 @@
 net: "models/bn_inception/train_val.prototxt"
-test_iter: 2000
+test_iter: 1000
 test_interval: 1000
 test_initialization: false
 display: 40
@@ -11,5 +11,5 @@ max_iter: 5000000
 momentum: 0.9
 weight_decay: 0.0001
 snapshot: 40000
-snapshot_prefix: "models/bn_inception/bn_x30"
+snapshot_prefix: "models/bn_inception/bn_x30/bn_x30"
 solver_mode: GPU
