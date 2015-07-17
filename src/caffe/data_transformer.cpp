@@ -37,12 +37,12 @@ DataTransformer<Dtype>::DataTransformer(const TransformationParameter& param,
 template<typename Dtype>
 void DataTransformer<Dtype>::Transform(const Datum& datum,
                                        Dtype* transformed_data) {
+  const int crop_size = param_.crop_size();
   const string& data = datum.data();
   const int datum_channels = datum.channels();
   const int datum_height = datum.height();
   const int datum_width = datum.width();
 
-  const int crop_size = param_.crop_size();
   int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
   int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
 
@@ -156,6 +156,9 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   const int datum_height = datum.height();
   const int datum_width = datum.width();
 
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
   // Check dimensions.
   const int channels = transformed_blob->channels();
   const int height = transformed_blob->height();
@@ -166,9 +169,6 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   CHECK_LE(height, datum_height);
   CHECK_LE(width, datum_width);
   CHECK_GE(num, 1);
-
-  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
-  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
 
   if (crop_height) {
     CHECK_EQ(crop_height, height);
@@ -234,6 +234,9 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   const int img_height = cv_img.rows;
   const int img_width = cv_img.cols;
 
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
   // Check dimensions.
   const int channels = transformed_blob->channels();
   const int height = transformed_blob->height();
@@ -246,9 +249,6 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   CHECK_GE(num, 1);
 
   CHECK(cv_img.depth() == CV_8U) << "Image data type must be unsigned byte";
-
-  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
-  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
 
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
@@ -347,11 +347,14 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
   const int input_height = input_blob->height();
   const int input_width = input_blob->width();
 
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
   if (transformed_blob->count() == 0) {
     // Initialize transformed_blob with the right shape.
-    if (crop_size) {
+    if (crop_height > 0 || crop_width > 0) {
       transformed_blob->Reshape(input_num, input_channels,
-                                crop_size, crop_size);
+                                crop_height, crop_width);
     } else {
       transformed_blob->Reshape(input_num, input_channels,
                                 input_height, input_width);
@@ -368,9 +371,6 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
   CHECK_EQ(input_channels, channels);
   CHECK_GE(input_height, height);
   CHECK_GE(input_width, width);
-
-  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
-  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
 
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
@@ -479,16 +479,18 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(const Datum& datum) {
   const int datum_channels = datum.channels();
   const int datum_height = datum.height();
   const int datum_width = datum.width();
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
   // Check dimensions.
   CHECK_GT(datum_channels, 0);
-  CHECK_GE(datum_height, crop_size);
-  CHECK_GE(datum_width, crop_size);
+  CHECK_GE(datum_height, crop_height);
+  CHECK_GE(datum_width, crop_width);
   // Build BlobShape.
   vector<int> shape(4);
   shape[0] = 1;
   shape[1] = datum_channels;
-  shape[2] = (crop_size)? crop_size: datum_height;
-  shape[3] = (crop_size)? crop_size: datum_width;
+  shape[2] = (crop_height)? crop_height: datum_height;
+  shape[3] = (crop_width)? crop_width: datum_width;
   return shape;
 }
 
@@ -510,16 +512,18 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(const cv::Mat& cv_img) {
   const int img_channels = cv_img.channels();
   const int img_height = cv_img.rows;
   const int img_width = cv_img.cols;
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
   // Check dimensions.
   CHECK_GT(img_channels, 0);
-  CHECK_GE(img_height, crop_size);
-  CHECK_GE(img_width, crop_size);
+  CHECK_GE(img_height, crop_height);
+  CHECK_GE(img_width, crop_width);
   // Build BlobShape.
   vector<int> shape(4);
   shape[0] = 1;
   shape[1] = img_channels;
-  shape[2] = (crop_size)? crop_size: img_height;
-  shape[3] = (crop_size)? crop_size: img_width;
+  shape[2] = (crop_height)? crop_height: img_height;
+  shape[3] = (crop_width)? crop_width: img_width;
   return shape;
 }
 
