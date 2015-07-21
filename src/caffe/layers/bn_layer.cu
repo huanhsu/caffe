@@ -140,7 +140,7 @@ void BNLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
       spatial_statistic_.mutable_gpu_data());
   caffe_gpu_gemv<Dtype>(CblasTrans, num_, channels_, Dtype(1),
       spatial_statistic_.gpu_data(), batch_sum_multiplier_.gpu_data(),
-      Dtype(0), scale_diff);
+      Dtype(1), scale_diff);
 
   // gradient w.r.t. bias
   caffe_gpu_gemv<Dtype>(CblasNoTrans, num_ * channels_, height_ * width_,
@@ -148,7 +148,7 @@ void BNLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
       Dtype(0), spatial_statistic_.mutable_gpu_data());
   caffe_gpu_gemv<Dtype>(CblasTrans, num_, channels_, Dtype(1),
       spatial_statistic_.gpu_data(), batch_sum_multiplier_.gpu_data(),
-      Dtype(0), shift_diff);
+      Dtype(1), shift_diff);
 
   // gradient w.r.t. normalized inputs
   caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_, channels_, 1,
