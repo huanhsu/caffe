@@ -1,3 +1,8 @@
+#ifdef WITH_PYTHON_LAYER
+#include "boost/python.hpp"
+namespace bp = boost::python;
+#endif
+
 #include <glog/logging.h>
 
 #include <cstring>
@@ -10,11 +15,6 @@
 #include "boost/algorithm/string.hpp"
 #include "caffe/caffe.hpp"
 #include "caffe/util/mpi_templates.hpp"
-
-#ifdef WITH_PYTHON_LAYER
-#include "boost/python.hpp"
-namespace bp = boost::python;
-#endif
 
 using caffe::Blob;
 using caffe::Caffe;
