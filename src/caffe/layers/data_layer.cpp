@@ -106,7 +106,8 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   const int shuffle_pool_size =
       this->layer_param_.data_param().shuffle_pool_size();
   if (shuffle_pool_size > 1) {
-    shuffle_pool_index_.resize(shuffle_pool_size * batch_size);
+    shuffle_pool_index_.resize(shuffle_pool_size *
+        this->layer_param_.data_param().batch_size());
     for (int i = 0; i < shuffle_pool_index_.size(); ++i) {
       shuffle_pool_index_[i] = i;
     }
