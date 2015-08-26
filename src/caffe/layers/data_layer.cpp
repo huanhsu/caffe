@@ -26,13 +26,13 @@ template <typename Dtype>
 void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
 #ifdef USE_MPI
-  const int batch_size = this->layer_param_.data_param().batch_size();
-  if (batch_size % Caffe::mpi_size() != 0) {
-    LOG(FATAL) << "Batch size (" << batch_size << ") should be divisible by "
-                  "the number of MPI processes (" << Caffe::mpi_size() << ")";
+  if (this->layer_param_.data_param().batch_size() % Caffe::mpi_size() != 0) {
+    LOG(FATAL) << "Batch size (" << this->layer_param_.data_param().batch_size()
+               << ") should be divisible by the number of MPI processes ("
+               << Caffe::mpi_size() << ")";
   }
   this->layer_param_.mutable_data_param()->set_batch_size(
-      batch_size / Caffe::mpi_size());
+      this->layer_param_.data_param().batch_size() / Caffe::mpi_size());
 #endif
   // Initialize DB
   db_.reset(db::GetDB(this->layer_param_.data_param().backend()));

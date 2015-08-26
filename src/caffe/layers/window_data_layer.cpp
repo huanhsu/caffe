@@ -48,6 +48,18 @@ void WindowDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   //    num_windows
   //    class_index overlap x1 y1 x2 y2
 
+#ifdef USE_MPI
+  if (this->layer_param_.window_data_param().batch_size()
+      % Caffe::mpi_size() != 0) {
+    LOG(FATAL) << "Batch size ("
+               << this->layer_param_.window_data_param().batch_size()
+               << ") should be divisible by the number of MPI processes ("
+               << Caffe::mpi_size() << ")";
+  }
+  this->layer_param_.mutable_window_data_param()->set_batch_size(
+      this->layer_param_.window_data_param().batch_size() / Caffe::mpi_size());
+#endif
+
   LOG(INFO) << "Window data layer:" << std::endl
       << "  foreground (object) overlap threshold: "
       << this->layer_param_.window_data_param().fg_threshold() << std::endl
