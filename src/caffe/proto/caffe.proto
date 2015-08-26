@@ -525,6 +525,10 @@ message DataParameter {
   optional bool mirror = 6 [default = false];
   // Force the encoded image to have 3 color channels
   optional bool force_encoded_color = 9 [default = false];
+  // The data layer will maintain a buffer of batch_size * shuffle_pool_size
+  // number of data samples, and randomly choose samples from the pool to form
+  // a mini-batch every iteration.
+  optional uint32 shuffle_pool_size = 10 [default = 1];
 }
 
 message DropoutParameter {

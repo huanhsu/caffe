@@ -58,6 +58,15 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     top[1]->Reshape(label_shape);
     this->prefetch_label_.Reshape(label_shape);
   }
+  // Initialize the shuffle pool index
+  const int shuffle_pool_size =
+      this->layer_param_.data_param().shuffle_pool_size();
+  if (shuffle_pool_size > 1) {
+    shuffle_pool_index_.resize(shuffle_pool_size * batch_size);
+    for (int i = 0; i < shuffle_pool_index_.size(); ++i) {
+      shuffle_pool_index_[i] = i;
+    }
+  }
 }
 
 // This function is used to create a thread that prefetches the data.
@@ -74,6 +83,8 @@ void DataLayer<Dtype>::InternalThreadEntry() {
   // Reshape according to the first datum of each batch
   // on single input batches allows for inputs of varying dimension.
   const int batch_size = this->layer_param_.data_param().batch_size();
+  const int shuffle_pool_size =
+      this->layer_param_.data_param().shuffle_pool_size();
   Datum datum;
   datum.ParseFromString(cursor_->value());
   // Use data_transformer to infer the expected blob shape from datum.
@@ -90,10 +101,24 @@ void DataLayer<Dtype>::InternalThreadEntry() {
     top_label = this->prefetch_label_.mutable_cpu_data();
   }
   timer.Start();
+  const bool is_shuffle_pool_full = (shuffle_pool_size > 1
+      && shuffle_pool_.size() >= shuffle_pool_size * batch_size);
+  if (is_shuffle_pool_full) {
+    shuffle(shuffle_pool_index_.begin(), shuffle_pool_index_.end());
+  }
   for (int item_id = 0; item_id < batch_size; ++item_id) {
-    // get a datum
+    // Get a datum to be transformed either from DB or the shuffle pool.
     Datum datum;
-    datum.ParseFromString(cursor_->value());
+    if (is_shuffle_pool_full) {
+      int pool_index = shuffle_pool_index_[item_id];
+      datum = shuffle_pool_[pool_index];
+      shuffle_pool_[pool_index].ParseFromString(cursor_->value());
+    } else {
+      datum.ParseFromString(cursor_->value());
+      if (shuffle_pool_size > 1) { // Ths shuffle pool is not full.
+        shuffle_pool_.push_back(datum);
+      }
+    }
     read_time += timer.MicroSeconds();
     timer.Start();
     // Apply data transformations (mirror, scale, crop...)
