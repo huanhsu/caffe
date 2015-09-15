@@ -298,7 +298,7 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   }
 
   if (crop_height || crop_width) {
-    cv::Rect roi(w_off, h_off, height, width);
+    cv::Rect roi(w_off, h_off, width, height);
     cv_cropped_img = cv_img(roi);
   } else {
     CHECK_EQ(img_height, height);
