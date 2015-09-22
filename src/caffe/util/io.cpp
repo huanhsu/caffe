@@ -170,7 +170,7 @@ bool ReadImageToDatumResizeShortSide(const string& filename, const int label,
                                                    is_color);
   if (cv_img.data) {
     if (encoding.size()) {
-      if ( (cv_img.channels() == 3) == is_color &&
+      if ( (cv_img.channels() == 3) == is_color && !short_side &&
           matchExt(filename, encoding) )
         return ReadFileToDatum(filename, label, datum);
       std::vector<uchar> buf;
