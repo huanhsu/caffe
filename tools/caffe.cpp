@@ -142,12 +142,14 @@ int train() {
   int gpu_id = gpus.size() == 0 ? -1 : gpus[0];
 #ifdef USE_MPI
   // Check whether the number of MPI processors matches the number of devices.
-  if (Caffe::mpi_rank() == 0) {
-    CHECK_EQ(Caffe::mpi_size(), gpus.size())
-        << "The number of MPI processors should match"
-           "the number of GPU devices provided";
+  if (gpus.size() > 0) {
+    if (Caffe::mpi_rank() == 0) {
+      CHECK_EQ(Caffe::mpi_size(), gpus.size())
+          << "The number of MPI processors should match"
+             "the number of GPU devices provided";
+    }
+    gpu_id = gpus[Caffe::mpi_rank()];
   }
-  gpu_id = gpus[Caffe::mpi_rank()];
 #endif
 
   // Set device id and mode
@@ -188,12 +190,14 @@ int test() {
   int gpu_id = gpus.size() == 0 ? -1 : gpus[0];
 #ifdef USE_MPI
   // Check whether the number of MPI processors matches the number of devices.
-  if (Caffe::mpi_rank() == 0) {
-    CHECK_EQ(Caffe::mpi_size(), gpus.size())
-        << "The number of MPI processors should match"
-           "the number of GPU devices provided";
+  if (gpus.size() > 0) {
+    if (Caffe::mpi_rank() == 0) {
+      CHECK_EQ(Caffe::mpi_size(), gpus.size())
+          << "The number of MPI processors should match"
+             "the number of GPU devices provided";
+    }
+    gpu_id = gpus[Caffe::mpi_rank()];
   }
-  gpu_id = gpus[Caffe::mpi_rank()];
 #endif
 
   // Set device id and mode
@@ -265,12 +269,14 @@ int time() {
   int gpu_id = gpus.size() == 0 ? -1 : gpus[0];
 #ifdef USE_MPI
   // Check whether the number of MPI processors matches the number of devices.
-  if (Caffe::mpi_rank() == 0) {
-    CHECK_EQ(Caffe::mpi_size(), gpus.size())
-        << "The number of MPI processors should match"
-           "the number of GPU devices provided";
+  if (gpus.size() > 0) {
+    if (Caffe::mpi_rank() == 0) {
+      CHECK_EQ(Caffe::mpi_size(), gpus.size())
+          << "The number of MPI processors should match"
+             "the number of GPU devices provided";
+    }
+    gpu_id = gpus[Caffe::mpi_rank()];
   }
-  gpu_id = gpus[Caffe::mpi_rank()];
 #endif
 
   // Set device id and mode
@@ -337,25 +343,27 @@ int time() {
     }
     backward_time += backward_timer.MicroSeconds();
 #ifdef USE_MPI
-    comm_timer.Start();
-    for (int i = layers.size() - 1; i >= 0; --i) {
-      if (serial_layers.find(layers[i]->layer_param().name()) !=
-          serial_layers.end()) {
-        comm_time_per_layer[i] = 0;
-        continue;
+    if (Caffe::mpi_size() > 1) {
+      comm_timer.Start();
+      for (int i = layers.size() - 1; i >= 0; --i) {
+        if (serial_layers.find(layers[i]->layer_param().name()) !=
+            serial_layers.end()) {
+          comm_time_per_layer[i] = 0;
+          continue;
+        }
+        const vector<shared_ptr<Blob<float> > >& blobs = layers[i]->blobs();
+        timer.Start();
+        for (int j = 0; j < blobs.size(); ++j) {
+          if (Caffe::mpi_size() == 1) continue;
+          MPIAllreduce<float>(blobs[j]->count(), MPI_IN_PLACE,
+              blobs[j]->mutable_cpu_diff(), MPI_SUM);
+          caffe_scal(blobs[j]->count(), 1.0f / Caffe::mpi_size(),
+              blobs[j]->mutable_cpu_diff());
+        }
+        comm_time_per_layer[i] += timer.MicroSeconds();
       }
-      const vector<shared_ptr<Blob<float> > >& blobs = layers[i]->blobs();
-      timer.Start();
-      for (int j = 0; j < blobs.size(); ++j) {
-        if (Caffe::mpi_size() == 1) continue;
-        MPIAllreduce<float>(blobs[j]->count(), MPI_IN_PLACE,
-            blobs[j]->mutable_cpu_diff(), MPI_SUM);
-        caffe_scal(blobs[j]->count(), 1.0f / Caffe::mpi_size(),
-            blobs[j]->mutable_cpu_diff());
-      }
-      comm_time_per_layer[i] += timer.MicroSeconds();
+      comm_time += comm_timer.MicroSeconds();
     }
-    comm_time += comm_timer.MicroSeconds();
     LOG(INFO) << "Iteration: " << j + 1 << " forward-backward-comm time: "
       << iter_timer.MilliSeconds() << " ms.";
 #else

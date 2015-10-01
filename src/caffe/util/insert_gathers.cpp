@@ -24,7 +24,9 @@ void InsertGathers(const set<string>& serial_layers, NetParameter* param) {
   param_gather.clear_layer();
   for (int i = 0; i < num_layers; ++i) {
     const LayerParameter& layer_up = param->layer(i);
-    if (serial_layers.find(layer_up.name()) == serial_layers.end()) {
+    // Do not insert when the upper one is already the MPIGather layer.
+    if (serial_layers.find(layer_up.name()) == serial_layers.end() ||
+        layer_up.type() == "MPIGather") {
       LayerParameter* layer = param_gather.add_layer();
       layer->CopyFrom(layer_up);
       continue;

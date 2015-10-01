@@ -50,15 +50,21 @@ void GlobalInit(int* pargc, char*** pargv) {
 Caffe::Caffe()
     : random_generator_(), mode_(Caffe::CPU) {
 #ifdef USE_MPI
-  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
-  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
+  MPI_Initialized(&mpi_initialized_);
+  if (mpi_initialized_) {
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
+  } else {
+    mpi_rank_ = 0;
+    mpi_size_ = 0;
+  }
   if (mpi_rank_ > 0) FLAGS_minloglevel = 5;
 #endif
 }
 
 Caffe::~Caffe() {
 #ifdef USE_MPI
-  MPI_Finalize();
+  if (mpi_initialized_) MPI_Finalize();
 #endif
 }
 
@@ -116,8 +122,14 @@ Caffe::Caffe()
     LOG(ERROR) << "Cannot create Curand generator. Curand won't be available.";
   }
 #ifdef USE_MPI
-  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
-  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
+  MPI_Initialized(&mpi_initialized_);
+  if (mpi_initialized_) {
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank_);
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size_);
+  } else {
+    mpi_rank_ = 0;
+    mpi_size_ = 0;
+  }
   if (mpi_rank_ > 0) FLAGS_minloglevel = 5;
 #endif
 }
@@ -128,7 +140,7 @@ Caffe::~Caffe() {
     CURAND_CHECK(curandDestroyGenerator(curand_generator_));
   }
 #ifdef USE_MPI
-  MPI_Finalize();
+  if (mpi_initialized_) MPI_Finalize();
 #endif
 }
 

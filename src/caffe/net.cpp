@@ -51,8 +51,10 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
 #ifdef USE_MPI
   // Determine which layers should be in parallel and insert a MPIGatherLayer
   // properly.
-  DetermineLayerParallelOrSerial(param);
-  InsertGathers(serial_layers_, &param);
+  if (Caffe::mpi_size() > 1) {
+    DetermineLayerParallelOrSerial(param);
+    InsertGathers(serial_layers_, &param);
+  }
 #endif
   // Basically, build all the layers and set up their connections.
   name_ = param.name();
@@ -1013,7 +1015,8 @@ void Net<Dtype>::DetermineLayerParallelOrSerial(const NetParameter& param) {
         layer_type == "HingeLoss" ||
         layer_type == "SigmoidCrossEntropyLoss" ||
         layer_type == "InfogainLoss" ||
-        layer_type == "Accuracy") {
+        layer_type == "Accuracy" ||
+        layer_type == "MPIGather") {
       serial_layers_.insert(layer_name);
     }
   }
