@@ -152,6 +152,7 @@ class Caffe {
 #ifdef USE_MPI
   inline static int mpi_rank() { return Get().mpi_rank_; }
   inline static int mpi_size() { return Get().mpi_size_; }
+  inline static int mpi_initialized() { return Get().mpi_initialized_; }
 #endif
 
  protected:
@@ -167,6 +168,7 @@ class Caffe {
 #ifdef USE_MPI
   int mpi_rank_;
   int mpi_size_;
+  int mpi_initialized_;
 #endif
 
  private:

@@ -86,7 +86,9 @@ void Solver<Dtype>::InitTrainNet() {
   net_param.mutable_state()->CopyFrom(net_state);
   net_.reset(new Net<Dtype>(net_param));
 #ifdef USE_MPI
-  net_->SyncLayers();
+  if (Caffe::mpi_size() > 1) {
+    net_->SyncLayers();
+  }
 #endif
 }
 
@@ -164,7 +166,9 @@ void Solver<Dtype>::InitTestNets() {
     test_nets_[i].reset(new Net<Dtype>(net_params[i]));
     test_nets_[i]->set_debug_info(param_.debug_info());
 #ifdef USE_MPI
-    test_nets_[i]->SyncLayers();
+    if (Caffe::mpi_size() > 1) {
+      test_nets_[i]->SyncLayers();
+    }
 #endif
   }
 }
@@ -343,7 +347,7 @@ void Solver<Dtype>::Test(const int test_net_id) {
 template <typename Dtype>
 void Solver<Dtype>::Snapshot() {
 #ifdef USE_MPI
-  if (Caffe::mpi_rank() != 0) return;
+  if (Caffe::mpi_rank() > 0) return;
 #endif
   string model_filename;
   switch (param_.snapshot_format()) {
@@ -496,18 +500,20 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   }
 
 #ifdef USE_MPI
-  // Accumulate and average the gradients of parameters of parallel layers.
-  const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
-  const vector<shared_ptr<Layer<Dtype> > >& net_layers = this->net_->layers();
-  const vector<pair<int, int> >& param_layer_indices =
-      this->net_->param_layer_indices();
-  const set<string>& serial_layers = this->net_->serial_layers();
-  for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
-    const int layer_id = param_layer_indices[param_id].first;
-    const string& layer_name = net_layers[layer_id]->layer_param().name();
-    if (serial_layers.find(layer_name) != serial_layers.end()) continue;
-    MPIAllreduce<Dtype>(net_params[param_id]->count(), MPI_IN_PLACE,
-        net_params[param_id]->mutable_cpu_diff(), MPI_SUM);
+  if (Caffe::mpi_size() > 1) {
+    // Accumulate and average the gradients of parameters of parallel layers.
+    const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
+    const vector<shared_ptr<Layer<Dtype> > >& net_layers = this->net_->layers();
+    const vector<pair<int, int> >& param_layer_indices =
+        this->net_->param_layer_indices();
+    const set<string>& serial_layers = this->net_->serial_layers();
+    for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
+      const int layer_id = param_layer_indices[param_id].first;
+      const string& layer_name = net_layers[layer_id]->layer_param().name();
+      if (serial_layers.find(layer_name) != serial_layers.end()) continue;
+      MPIAllreduce<Dtype>(net_params[param_id]->count(), MPI_IN_PLACE,
+          net_params[param_id]->mutable_cpu_diff(), MPI_SUM);
+    }
   }
 #endif
 
