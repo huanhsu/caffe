@@ -51,7 +51,15 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
 #ifdef USE_MPI
   // Determine which layers should be in parallel and insert a MPIGatherLayer
   // properly.
-  if (Caffe::mpi_size() > 1) {
+  bool has_gather_or_scatter = false;
+  for (int layer_id = 0; layer_id < param.layer_size(); ++layer_id) {
+    if (param.layer(layer_id).type() == "MPIGather" ||
+        param.layer(layer_id).type() == "MPIScatter") {
+      has_gather_or_scatter = true;
+      break;
+    }
+  }
+  if (Caffe::mpi_size() > 1 && !has_gather_or_scatter) {
     DetermineLayerParallelOrSerial(param);
     InsertGathers(serial_layers_, &param);
   }
