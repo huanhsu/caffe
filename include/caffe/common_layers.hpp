@@ -632,6 +632,31 @@ class MPIGatherLayer : public Layer<Dtype> {
 };
 
 /**
+ * @brief Scatter bottom blob from MPI processes and concatenate them in rank
+ *        order as the output.
+ *
+ * TODO(dox): thorough documentation for Forward, Backward, and proto params.
+ */
+template <typename Dtype>
+class MPIScatterLayer : public Layer<Dtype> {
+ public:
+  explicit MPIScatterLayer(const LayerParameter& param)
+      : Layer<Dtype>(param) {}
+  virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+
+  virtual inline const char* type() const { return "MPIScatter"; }
+
+ protected:
+  virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
+};
+
+/**
  * @brief Batch normalization the input blob along the channel axis while
  *        averaging over the spatial axes.
  *

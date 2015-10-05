@@ -9,30 +9,30 @@
 namespace caffe {
 
 template <typename Dtype>
-void MPIGatherLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+void MPIScatterLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   CHECK_EQ(bottom.size(), top.size())
       << "The number of bottom and top blobs must be the same";
 }
 
 template <typename Dtype>
-void MPIGatherLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
+void MPIScatterLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   for (int i = 0; i < bottom.size(); ++i) {
     vector<int> shape = bottom[i]->shape();
     if (Caffe::mpi_size() > 1) {
-      shape[0] *= Caffe::mpi_size();
+      shape[0] /= Caffe::mpi_size();
     }
     top[i]->Reshape(shape);
   }
 }
 
 template <typename Dtype>
-void MPIGatherLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+void MPIScatterLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   for (int i = 0; i < bottom.size(); ++i) {
     if (Caffe::mpi_size() > 1) {
-      MPIGather<Dtype>(bottom[i]->count(), bottom[i]->cpu_data(),
+      MPIScatter<Dtype>(bottom[i]->count(), bottom[i]->cpu_data(),
           top[i]->mutable_cpu_data());
     } else {
       top[i]->ShareData(*bottom[i]);
@@ -41,11 +41,11 @@ void MPIGatherLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 }
 
 template <typename Dtype>
-void MPIGatherLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
+void MPIScatterLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
   for (int i = 0; i < bottom.size(); ++i) {
     if (Caffe::mpi_size() > 1) {
-      MPIScatter<Dtype>(bottom[i]->count(), top[i]->cpu_diff(),
+      MPIGather<Dtype>(bottom[i]->count(), top[i]->cpu_diff(),
           bottom[i]->mutable_cpu_diff());
     } else {
       bottom[i]->ShareDiff(*top[i]);
@@ -53,8 +53,8 @@ void MPIGatherLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
   }
 }
 
-INSTANTIATE_CLASS(MPIGatherLayer);
-REGISTER_LAYER_CLASS(MPIGather);
+INSTANTIATE_CLASS(MPIScatterLayer);
+REGISTER_LAYER_CLASS(MPIScatter);
 
 } // namespace caffe
 
