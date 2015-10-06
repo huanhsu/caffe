@@ -59,6 +59,8 @@ message FillerParameter {
     AVERAGE = 2;
   }
   optional VarianceNorm variance_norm = 8 [default = FAN_IN];
+  // The binary proto file name used by BlobProto filler
+  optional string source = 9;
 }
 
 message NetParameter {
@@ -300,7 +302,7 @@ message ParamSpec {
 // NOTE
 // Update the next available ID when you add a new LayerParameter field.
 //
-// LayerParameter next available layer-specific ID: 137 (last added: reduction_param)
+// LayerParameter next available layer-specific ID: 139 (last added: softmax_noisy_label_loss_param)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -378,6 +380,7 @@ message LayerParameter {
   optional ReshapeParameter reshape_param = 133;
   optional SigmoidParameter sigmoid_param = 124;
   optional SoftmaxParameter softmax_param = 125;
+  optional SoftmaxNoisyLabelLossParameter softmax_noisy_label_loss_param = 138;
   optional SPPParameter spp_param = 132;
   optional SliceParameter slice_param = 126;
   optional TanHParameter tanh_param = 127;
@@ -899,6 +902,12 @@ message SoftmaxParameter {
   // from the end (e.g., -1 for the last axis).
   // Any other axes will be evaluated as independent softmaxes.
   optional int32 axis = 2 [default = 1];
+}
+
+// Message that stores parameters used by SoftmaxWithNoisyLabelLossLayer
+message SoftmaxNoisyLabelLossParameter {
+  optional float update_noise_lr = 1 [default = 1.0];
+  optional FillerParameter matrix_c_filler = 2;
 }
 
 message TanHParameter {
