@@ -11,51 +11,6 @@
 
 namespace caffe {
 
-// template <typename Dtype>
-// static void sort_then_print(std::vector<std::pair<Dtype, int> >& sort_buf, int top_k) {
-//   std::partial_sort(sort_buf.begin(), sort_buf.begin() + top_k,
-//       sort_buf.end(), std::greater<std::pair<Dtype, int> >());
-//   for (int k = 0; k < top_k; ++k) {
-//     printf("%1d: %.3lf ", sort_buf[k].second, sort_buf[k].first);
-//   }
-//   printf("\n");
-// }
-
-// template <typename Dtype>
-// static void print_info(const Blob<Dtype>& prob_y, const Blob<Dtype>& prob_z,
-//     const Blob<Dtype>& posterior, int index) {
-//   const int top_k = 3;
-//   // sort by prob_y
-//   std::vector<std::pair<Dtype, int> > sort_buf;
-//   for (int j = 0; j < prob_y.channels(); ++j) {
-//     sort_buf.push_back(std::make_pair(prob_y.data_at(index, j, 0, 0), j));
-//   }
-//   sort_then_print(sort_buf, top_k);
-//   // sort by prob_z
-//   sort_buf.clear();
-//   for (int j = 0; j < prob_z.channels(); ++j) {
-//     sort_buf.push_back(std::make_pair(prob_z.data_at(index, j, 0, 0), j));
-//   }
-//   sort_then_print(sort_buf, top_k);
-//   // sort by posterior of y
-//   sort_buf.clear();
-//   for (int j = 0; j < posterior.channels(); ++j) {
-//     Dtype sum = 0;
-//     for (int k = 0; k < posterior.height(); ++k) sum += posterior.data_at(index, j, k, 0);
-//     sort_buf.push_back(std::make_pair(sum, j));
-//   }
-//   sort_then_print(sort_buf, top_k);
-//   // sort by posterior of z
-//   sort_buf.clear();
-//   for (int k = 0; k < posterior.height(); ++k) {
-//     Dtype sum = 0;
-//     for (int j = 0; j < posterior.channels(); ++j) sum += posterior.data_at(index, j, k, 0);
-//     sort_buf.push_back(std::make_pair(sum, k));
-//   }
-//   sort_then_print(sort_buf, top_k);
-//   printf("\n");
-// }
-
 template <typename Dtype>
 void SoftmaxWithNoisyLabelLossLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
