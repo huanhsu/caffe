@@ -19,7 +19,7 @@ void BNLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* shift_data = this->blobs_[1]->gpu_data();
 
   // Mean normalization
-  if (this->phase_ == TEST && moving_average_) {
+  if (frozen_ || (this->phase_ == TEST && moving_average_)) {
     // Use the moving average mean
     caffe_copy(batch_statistic_.count(), this->blobs_[2]->gpu_data(),
         batch_statistic_.mutable_gpu_data());
@@ -53,8 +53,8 @@ void BNLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
       broadcast_buffer_.gpu_data(), top_data);
 
   // Variance normalization
-  if (this->phase_ == TEST && moving_average_) {
-    // Use the moving average mean
+  if (frozen_ || (this->phase_ == TEST && moving_average_)) {
+    // Use the moving average variance
     caffe_copy(batch_statistic_.count(), this->blobs_[3]->gpu_data(),
         batch_statistic_.mutable_gpu_data());
   } else {
@@ -92,10 +92,12 @@ void BNLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
       broadcast_buffer_.gpu_data(), top_data);
 
   // Save the normalized inputs and std for backprop
-  caffe_copy(broadcast_buffer_.count(), const_top_data,
-      x_norm_.mutable_gpu_data());
-  caffe_copy(batch_statistic_.count(), batch_statistic_.gpu_data(),
-      x_std_.mutable_gpu_data());
+  if (!frozen_) {
+    caffe_copy(broadcast_buffer_.count(), const_top_data,
+        x_norm_.mutable_gpu_data());
+    caffe_copy(batch_statistic_.count(), batch_statistic_.gpu_data(),
+        x_std_.mutable_gpu_data());
+  }
 
   // Scale
   caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_, channels_, 1,
@@ -123,6 +125,37 @@ void BNLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void BNLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
   const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
+  if (frozen_) {
+    if (propagate_down[0]) {
+      const Dtype* const_top_diff = top[0]->gpu_diff();
+      Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
+      // Use the moving average variance
+      caffe_copy(batch_statistic_.count(), this->blobs_[3]->gpu_data(),
+          batch_statistic_.mutable_gpu_data());
+      // Add eps
+      caffe_gpu_add_scalar(batch_statistic_.count(), bn_eps_,
+          batch_statistic_.mutable_gpu_data());
+      // Standard deviation
+      caffe_gpu_powx(batch_statistic_.count(), batch_statistic_.gpu_data(),
+          Dtype(0.5), batch_statistic_.mutable_gpu_data());
+      // Divide slope by std
+      caffe_gpu_div(batch_statistic_.count(), this->blobs_[0]->gpu_data(),
+          batch_statistic_.gpu_data(), batch_statistic_.mutable_gpu_data());
+      // Broadcast
+      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_, channels_, 1,
+          Dtype(1), batch_sum_multiplier_.gpu_data(), batch_statistic_.gpu_data(),
+          Dtype(0), spatial_statistic_.mutable_gpu_data());
+      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_ * channels_,
+          height_ * width_, 1, Dtype(1),
+          spatial_statistic_.gpu_data(), spatial_sum_multiplier_.gpu_data(),
+          Dtype(0), broadcast_buffer_.mutable_gpu_data());
+      // Elementwise multiply top grad with (slope / std)
+      caffe_gpu_mul(broadcast_buffer_.count(), const_top_diff,
+          broadcast_buffer_.gpu_data(), bottom_diff);
+    }
+    return;
+  }
+
   // gradient w.r.t. slope
   if (this->param_propagate_down_[0]) {
     const Dtype* const_top_diff = top[0]->gpu_diff();

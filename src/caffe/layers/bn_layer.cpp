@@ -10,6 +10,7 @@ namespace caffe {
 template <typename Dtype>
 void BNLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
+  frozen_ = this->layer_param_.bn_param().frozen();
   moving_average_ = this->layer_param_.bn_param().moving_average();
   bn_momentum_ = this->layer_param_.bn_param().momentum();
   bn_eps_ = this->layer_param_.bn_param().eps();
@@ -42,7 +43,7 @@ void BNLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
           this->blobs_[2]->mutable_cpu_data());
       // moving average variance
       this->blobs_[3].reset(new Blob<Dtype>(shape));
-      caffe_set(this->blobs_[3]->count(), Dtype(0),
+      caffe_set(this->blobs_[3]->count(), Dtype(1),
           this->blobs_[3]->mutable_cpu_data());
     }
   }
@@ -85,7 +86,7 @@ void BNLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* shift_data = this->blobs_[1]->cpu_data();
 
   // Mean normalization
-  if (this->phase_ == TEST && moving_average_) {
+  if (frozen_ || (this->phase_ == TEST && moving_average_)) {
     // Use the moving average mean
     caffe_copy(batch_statistic_.count(), this->blobs_[2]->cpu_data(),
         batch_statistic_.mutable_cpu_data());
@@ -119,8 +120,8 @@ void BNLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       broadcast_buffer_.cpu_data(), top_data);
 
   // Variance normalization
-  if (this->phase_ == TEST && moving_average_) {
-    // Use the moving average mean
+  if (frozen_ || (this->phase_ == TEST && moving_average_)) {
+    // Use the moving average variance
     caffe_copy(batch_statistic_.count(), this->blobs_[3]->cpu_data(),
         batch_statistic_.mutable_cpu_data());
   } else {
@@ -158,10 +159,12 @@ void BNLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       broadcast_buffer_.cpu_data(), top_data);
 
   // Save the normalized inputs and std for backprop
-  caffe_copy(broadcast_buffer_.count(), const_top_data,
-      x_norm_.mutable_cpu_data());
-  caffe_copy(batch_statistic_.count(), batch_statistic_.cpu_data(),
-      x_std_.mutable_cpu_data());
+  if (!frozen_) {
+    caffe_copy(broadcast_buffer_.count(), const_top_data,
+        x_norm_.mutable_cpu_data());
+    caffe_copy(batch_statistic_.count(), batch_statistic_.cpu_data(),
+        x_std_.mutable_cpu_data());
+  }
 
   // Scale
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_, channels_, 1,
@@ -189,6 +192,37 @@ void BNLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void BNLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
   const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
+  if (frozen_) {
+    if (propagate_down[0]) {
+      const Dtype* const_top_diff = top[0]->cpu_diff();
+      Dtype* bottom_diff = bottom[0]->mutable_cpu_diff();
+      // Use the moving average variance
+      caffe_copy(batch_statistic_.count(), this->blobs_[3]->cpu_data(),
+          batch_statistic_.mutable_cpu_data());
+      // Add eps
+      caffe_add_scalar(batch_statistic_.count(), bn_eps_,
+          batch_statistic_.mutable_cpu_data());
+      // Standard deviation
+      caffe_powx(batch_statistic_.count(), batch_statistic_.cpu_data(),
+          Dtype(0.5), batch_statistic_.mutable_cpu_data());
+      // Divide slope by std
+      caffe_div(batch_statistic_.count(), this->blobs_[0]->cpu_data(),
+          batch_statistic_.cpu_data(), batch_statistic_.mutable_cpu_data());
+      // Broadcast
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_, channels_, 1,
+          Dtype(1), batch_sum_multiplier_.cpu_data(), batch_statistic_.cpu_data(),
+          Dtype(0), spatial_statistic_.mutable_cpu_data());
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_ * channels_,
+          height_ * width_, 1, Dtype(1),
+          spatial_statistic_.cpu_data(), spatial_sum_multiplier_.cpu_data(),
+          Dtype(0), broadcast_buffer_.mutable_cpu_data());
+      // Elementwise multiply top grad with (slope / std)
+      caffe_mul(broadcast_buffer_.count(), const_top_diff,
+          broadcast_buffer_.cpu_data(), bottom_diff);
+    }
+    return;
+  }
+
   // gradient w.r.t. slope
   if (this->param_propagate_down_[0]) {
     const Dtype* const_top_diff = top[0]->cpu_diff();
