@@ -167,6 +167,7 @@ message SolverParameter {
   //    - sigmoid: the effective learning rate follows a sigmod decay
   //      return base_lr ( 1/(1 + exp(-gamma * (iter - stepsize))))
   //    - stepdecr: return base_lr * (1 - gamma * (floor(iter / step)))
+  //    - smoothstep: return base_lr * gamma ^ (iter / step)
   //
   // where base_lr, max_iter, gamma, step, stepvalue and power are defined
   // in the solver parameter protocol buffer, and iter is the current iteration.
