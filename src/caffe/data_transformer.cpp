@@ -462,6 +462,9 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
 template<typename Dtype>
 void DataTransformer<Dtype>::TransformObjLoc(const Datum& datum,
       Blob<Dtype>* transformed_img_blob, Blob<Dtype>* transformed_bboxes_blob) {
+  // Initialize the bboxes data with 0, indicating they are invalid.
+  caffe_set(transformed_bboxes_blob->count(), Dtype(0),
+            transformed_bboxes_blob->mutable_cpu_data());
   // If datum is encoded, decoded and transform the cv::image.
   if (datum.encoded()) {
     CHECK(!(param_.force_color() && param_.force_gray()))
