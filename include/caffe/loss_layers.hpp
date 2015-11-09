@@ -558,6 +558,74 @@ class MultinomialLogisticLossLayer : public LossLayer<Dtype> {
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
 };
 
+template <typename Dtype>
+class ObjLocLossLayer : public LossLayer<Dtype> {
+ public:
+  explicit ObjLocLossLayer(const LayerParameter& param)
+      : LossLayer<Dtype>(param) {}
+  virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+
+  virtual inline const char* type() const { return "ObjLocLoss"; }
+
+  // predicted bboxes, category label, ground truth bboxes.
+  virtual inline int ExactNumBottomBlobs() const { return 4; }
+
+  virtual inline bool AllowForceBackward(const int bottom_index) const {
+    return bottom_index == 0;
+  }
+
+ protected:
+  /// @copydoc ObjLocLossLayer
+  virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Forward_gpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
+  virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
+
+  Dtype iou_threshold_;
+
+  shared_ptr<Layer<Dtype> > reg_loss_layer_;
+  vector<Blob<Dtype>*> reg_loss_bottom_vec_;
+  vector<Blob<Dtype>*> reg_loss_top_vec_;
+
+  Blob<Dtype> pred_;
+  Blob<Dtype> gt_;
+};
+
+template <typename Dtype>
+class ObjLocAccuracyLayer : public Layer<Dtype> {
+ public:
+  explicit ObjLocAccuracyLayer(const LayerParameter& param)
+      : Layer<Dtype>(param) {}
+  virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+
+  virtual inline const char* type() const { return "ObjLocAccuracy"; }
+  virtual inline int ExactNumBottomBlobs() const { return 4; }
+  virtual inline int ExactNumTopBlobs() const { return 1; }
+
+ protected:
+  virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+
+  /// @brief Not implemented -- ObjLocAccuracyLayer cannot be used as a loss.
+  virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
+    for (int i = 0; i < propagate_down.size(); ++i) {
+      if (propagate_down[i]) { NOT_IMPLEMENTED; }
+    }
+  }
+  Dtype iou_threshold_;
+};
+
 /**
  * @brief Computes the cross-entropy (logistic) loss @f$
  *          E = \frac{-1}{n} \sum\limits_{n=1}^N \left[
