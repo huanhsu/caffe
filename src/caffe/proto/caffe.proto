@@ -301,7 +301,7 @@ message ParamSpec {
 // NOTE
 // Update the next available ID when you add a new LayerParameter field.
 //
-// LayerParameter next available layer-specific ID: 137 (last added: reduction_param)
+// LayerParameter next available layer-specific ID: 138 (last added: bn_param)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -539,6 +539,8 @@ message DataParameter {
   // number of data samples, and randomly choose samples from the pool to form
   // a mini-batch every iteration.
   optional uint32 shuffle_pool_size = 10 [default = 1];
+  // Below are used by ObjLocDataLayer
+  optional int32 max_num_bboxes = 11 [default = -1];
 }
 
 message DropoutParameter {
