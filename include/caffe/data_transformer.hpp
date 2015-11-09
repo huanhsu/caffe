@@ -88,6 +88,17 @@ class DataTransformer {
    */
   void Transform(Blob<Dtype>* input_blob, Blob<Dtype>* transformed_blob);
 
+  void TransformObjLoc(const Datum& datum,
+                       Blob<Dtype>* transformed_img_blob,
+                       Blob<Dtype>* transformed_bboxes_blob);
+
+  void TransformObjLoc(const cv::Mat& cv_img, const int num_bboxes,
+                       const float* bboxes_data,
+                       Blob<Dtype>* transformed_img_blob,
+                       Blob<Dtype>* transformed_bboxes_blob);
+
+
+
   /**
    * @brief Infers the shape of transformed_blob will have when
    *    the transformation is applied to the data.
@@ -135,6 +146,10 @@ class DataTransformer {
   virtual int Rand(int n);
 
   void Transform(const Datum& datum, Dtype* transformed_data);
+
+  void TransformObjLoc(const Datum& datum,
+                       Dtype* transformed_img_data,
+                       Dtype* transformed_bboxes_data);
   // Tranformation parameters
   TransformationParameter param_;
 

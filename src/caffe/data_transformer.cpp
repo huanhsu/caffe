@@ -460,6 +460,322 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
 }
 
 template<typename Dtype>
+void DataTransformer<Dtype>::TransformObjLoc(const Datum& datum,
+      Blob<Dtype>* transformed_img_blob, Blob<Dtype>* transformed_bboxes_blob) {
+  // If datum is encoded, decoded and transform the cv::image.
+  if (datum.encoded()) {
+    CHECK(!(param_.force_color() && param_.force_gray()))
+        << "cannot set both force_color and force_gray";
+    cv::Mat cv_img;
+    if (param_.force_color() || param_.force_gray()) {
+    // If force_color then decode in color otherwise decode in gray.
+      cv_img = DecodeDatumToCVMat(datum, param_.force_color());
+    } else {
+      cv_img = DecodeDatumToCVMatNative(datum);
+    }
+    // Transform the cv::image into img, and max_num_bboxes_ * 4 floats
+    // into bboxes.
+    const float* bboxes_data = datum.float_data().data();
+    TransformObjLoc(cv_img, datum.float_data_size() / 4, bboxes_data,
+        transformed_img_blob, transformed_bboxes_blob);
+  } else {
+    if (param_.force_color() || param_.force_gray()) {
+      LOG(ERROR) << "force_color and force_gray only for encoded datum";
+    }
+  }
+
+  const int crop_size = param_.crop_size();
+  const int datum_channels = datum.channels();
+  const int datum_height = datum.height();
+  const int datum_width = datum.width();
+
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
+  // Check dimensions.
+  const int channels = transformed_img_blob->channels();
+  const int height = transformed_img_blob->height();
+  const int width = transformed_img_blob->width();
+  const int num = transformed_img_blob->num();
+
+  CHECK_EQ(channels, datum_channels);
+  CHECK_LE(height, datum_height);
+  CHECK_LE(width, datum_width);
+  CHECK_GE(num, 1);
+
+  if (crop_height) {
+    CHECK_EQ(crop_height, height);
+  } else {
+    CHECK_EQ(datum_height, height);
+  }
+
+  if (crop_width) {
+    CHECK_EQ(crop_width, width);
+  } else {
+    CHECK_EQ(datum_width, width);
+  }
+
+  TransformObjLoc(datum,
+                  transformed_img_blob->mutable_cpu_data(),
+                  transformed_bboxes_blob->mutable_cpu_data());
+}
+
+template<typename Dtype>
+void DataTransformer<Dtype>::TransformObjLoc(
+      const cv::Mat& cv_img, const int num_bboxes, const float* bboxes_data,
+      Blob<Dtype>* transformed_img_blob, Blob<Dtype>* transformed_bboxes_blob) {
+  const int crop_size = param_.crop_size();
+  const int img_channels = cv_img.channels();
+  const int img_height = cv_img.rows;
+  const int img_width = cv_img.cols;
+
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
+  // Check dimensions.
+  const int channels = transformed_img_blob->channels();
+  const int height = transformed_img_blob->height();
+  const int width = transformed_img_blob->width();
+  const int num = transformed_img_blob->num();
+
+  CHECK_EQ(channels, img_channels);
+  CHECK_LE(height, img_height);
+  CHECK_LE(width, img_width);
+  CHECK_GE(num, 1);
+
+  CHECK(cv_img.depth() == CV_8U) << "Image data type must be unsigned byte";
+
+  const Dtype scale = param_.scale();
+  const bool do_mirror = param_.mirror() && Rand(2);
+  const bool has_mean_file = param_.has_mean_file();
+  const bool has_mean_values = mean_values_.size() > 0;
+
+  CHECK_GT(img_channels, 0);
+  CHECK_GE(img_height, crop_height);
+  CHECK_GE(img_width, crop_width);
+
+  Dtype* mean = NULL;
+  if (has_mean_file) {
+    CHECK_EQ(img_channels, data_mean_.channels());
+    CHECK_EQ(img_height, data_mean_.height());
+    CHECK_EQ(img_width, data_mean_.width());
+    mean = data_mean_.mutable_cpu_data();
+  }
+  if (has_mean_values) {
+    CHECK(mean_values_.size() == 1 || mean_values_.size() == img_channels) <<
+     "Specify either 1 mean_value or as many as channels: " << img_channels;
+    if (img_channels > 1 && mean_values_.size() == 1) {
+      // Replicate the mean_value for simplicity
+      for (int c = 1; c < img_channels; ++c) {
+        mean_values_.push_back(mean_values_[0]);
+      }
+    }
+  }
+
+  int h_off = 0;
+  int w_off = 0;
+  cv::Mat cv_cropped_img = cv_img;
+  if (crop_height) {
+    CHECK_EQ(crop_height, height);
+    if (phase_ == TRAIN) {
+      h_off = Rand(img_height - crop_height + 1);
+    } else {
+      h_off = (img_height - crop_height) / 2;
+    }
+  }
+  if (crop_width) {
+    CHECK_EQ(crop_width, width);
+    if (phase_ == TRAIN) {
+      w_off = Rand(img_width - crop_width + 1);
+    } else {
+      w_off = (img_width - crop_width) / 2;
+    }
+  }
+
+  if (crop_height || crop_width) {
+    cv::Rect roi(w_off, h_off, width, height);
+    cv_cropped_img = cv_img(roi);
+  } else {
+    CHECK_EQ(img_height, height);
+    CHECK_EQ(img_width, width);
+  }
+
+  CHECK(cv_cropped_img.data);
+
+  Dtype* transformed_img_data = transformed_img_blob->mutable_cpu_data();
+  int top_index;
+  for (int h = 0; h < height; ++h) {
+    const uchar* ptr = cv_cropped_img.ptr<uchar>(h);
+    int img_index = 0;
+    for (int w = 0; w < width; ++w) {
+      for (int c = 0; c < img_channels; ++c) {
+        if (do_mirror) {
+          top_index = (c * height + h) * width + (width - 1 - w);
+        } else {
+          top_index = (c * height + h) * width + w;
+        }
+        // int top_index = (c * height + h) * width + w;
+        Dtype pixel = static_cast<Dtype>(ptr[img_index++]);
+        if (has_mean_file) {
+          int mean_index = (c * img_height + h_off + h) * img_width + w_off + w;
+          transformed_img_data[top_index] =
+            (pixel - mean[mean_index]) * scale;
+        } else {
+          if (has_mean_values) {
+            transformed_img_data[top_index] =
+              (pixel - mean_values_[c]) * scale;
+          } else {
+            transformed_img_data[top_index] = pixel * scale;
+          }
+        }
+      }
+    }
+  }
+
+  // Compute the relative translation of the ground truth bbox w.r.t.
+  // the random cropped input bbox.
+  Dtype* transformed_bboxes_data = transformed_bboxes_blob->mutable_cpu_data();
+  const float top_x = w_off + width / 2;
+  const float top_y = h_off + height / 2;
+  const float log_width_scale = log(img_width / width);
+  const float log_height_scale = log(img_height / height);
+  for (int bbox_id = 0; bbox_id < num_bboxes; ++bbox_id) {
+    float x = bboxes_data[bbox_id * 4];
+    float y = bboxes_data[bbox_id * 4 + 1];
+    float w = bboxes_data[bbox_id * 4 + 2];
+    float h = bboxes_data[bbox_id * 4 + 3];
+    x = (x * img_width - top_x) / width;
+    if (do_mirror) x = -x;
+    y = (y * img_height - top_y) / height;
+    w = w + log_width_scale;
+    h = h + log_height_scale;
+    transformed_bboxes_data[bbox_id * 4] = x;
+    transformed_bboxes_data[bbox_id * 4 + 1] = y;
+    transformed_bboxes_data[bbox_id * 4 + 2] = w;
+    transformed_bboxes_data[bbox_id * 4 + 3] = h;
+  }
+}
+
+template<typename Dtype>
+void DataTransformer<Dtype>::TransformObjLoc(const Datum& datum,
+      Dtype* transformed_img_data, Dtype* transformed_bboxes_data) {
+  const int crop_size = param_.crop_size();
+  const string& data = datum.data();
+  const int datum_channels = datum.channels();
+  const int datum_height = datum.height();
+  const int datum_width = datum.width();
+
+  int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
+  int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+
+  const Dtype scale = param_.scale();
+  const bool do_mirror = param_.mirror() && Rand(2);
+  const bool has_mean_file = param_.has_mean_file();
+  const bool has_uint8 = data.size() > 0;
+  const bool has_mean_values = mean_values_.size() > 0;
+
+  CHECK_GT(datum_channels, 0);
+  CHECK_GE(datum_height, crop_height);
+  CHECK_GE(datum_width, crop_width);
+
+  Dtype* mean = NULL;
+  if (has_mean_file) {
+    CHECK_EQ(datum_channels, data_mean_.channels());
+    CHECK_EQ(datum_height, data_mean_.height());
+    CHECK_EQ(datum_width, data_mean_.width());
+    mean = data_mean_.mutable_cpu_data();
+  }
+  if (has_mean_values) {
+    CHECK(mean_values_.size() == 1 || mean_values_.size() == datum_channels) <<
+     "Specify either 1 mean_value or as many as channels: " << datum_channels;
+    if (datum_channels > 1 && mean_values_.size() == 1) {
+      // Replicate the mean_value for simplicity
+      for (int c = 1; c < datum_channels; ++c) {
+        mean_values_.push_back(mean_values_[0]);
+      }
+    }
+  }
+
+  int height = datum_height;
+  int width = datum_width;
+
+  int h_off = 0;
+  int w_off = 0;
+  if (crop_height) {
+    height = crop_height;
+    if (phase_ == TRAIN) {
+      h_off = Rand(datum_height - crop_height + 1);
+    } else {
+      h_off = (datum_height - crop_height) / 2;
+    }
+  }
+  if (crop_width) {
+    width = crop_width;
+    if (phase_ == TRAIN) {
+      w_off = Rand(datum_width - crop_width + 1);
+    } else {
+      w_off = (datum_width - crop_width) / 2;
+    }
+  }
+
+  Dtype datum_element;
+  int top_index, data_index;
+  for (int c = 0; c < datum_channels; ++c) {
+    for (int h = 0; h < height; ++h) {
+      for (int w = 0; w < width; ++w) {
+        data_index = (c * datum_height + h_off + h) * datum_width + w_off + w;
+        if (do_mirror) {
+          top_index = (c * height + h) * width + (width - 1 - w);
+        } else {
+          top_index = (c * height + h) * width + w;
+        }
+        if (has_uint8) {
+          datum_element =
+            static_cast<Dtype>(static_cast<uint8_t>(data[data_index]));
+        } else {
+          datum_element = datum.float_data(data_index);
+        }
+        if (has_mean_file) {
+          transformed_img_data[top_index] =
+            (datum_element - mean[data_index]) * scale;
+        } else {
+          if (has_mean_values) {
+            transformed_img_data[top_index] =
+              (datum_element - mean_values_[c]) * scale;
+          } else {
+            transformed_img_data[top_index] = datum_element * scale;
+          }
+        }
+      }
+    }
+  }
+
+  // Compute the relative translation of the ground truth bbox w.r.t.
+  // the random cropped input bbox.
+  const float top_x = w_off + width / 2;
+  const float top_y = h_off + height / 2;
+  const float log_width_scale = log(datum_width / width);
+  const float log_height_scale = log(datum_height / height);
+  const int num_bboxes = datum.float_data_size() / 4;
+  const float* bboxes_data = datum.float_data().data();
+  for (int bbox_id = 0; bbox_id < num_bboxes; ++bbox_id) {
+    float x = bboxes_data[bbox_id * 4];
+    float y = bboxes_data[bbox_id * 4 + 1];
+    float w = bboxes_data[bbox_id * 4 + 2];
+    float h = bboxes_data[bbox_id * 4 + 3];
+    x = (x * datum_width - top_x) / width;
+    if (do_mirror) x = -x;
+    y = (y * datum_height - top_y) / height;
+    w = w + log_width_scale;
+    h = h + log_height_scale;
+    transformed_bboxes_data[bbox_id * 4] = x;
+    transformed_bboxes_data[bbox_id * 4 + 1] = y;
+    transformed_bboxes_data[bbox_id * 4 + 2] = w;
+    transformed_bboxes_data[bbox_id * 4 + 3] = h;
+  }
+}
+
+template<typename Dtype>
 vector<int> DataTransformer<Dtype>::InferBlobShape(const Datum& datum) {
   if (datum.encoded()) {
     CHECK(!(param_.force_color() && param_.force_gray()))
