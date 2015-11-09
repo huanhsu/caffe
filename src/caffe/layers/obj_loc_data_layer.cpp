@@ -124,6 +124,12 @@ void ObjLocDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     bboxes_shape[0] = 1;
     this->transformed_bboxes_.Reshape(bboxes_shape);
   }
+  this->output_num_bboxes_ = (top.size() >= 4);
+  if (this->output_num_bboxes_) {
+    vector<int> shape(1, this->layer_param_.data_param().batch_size());
+    top[3]->Reshape(shape);
+    this->prefetch_num_bboxes_.Reshape(shape);
+  }
   // Initialize the shuffle pool index
   const int shuffle_pool_size =
       this->layer_param_.data_param().shuffle_pool_size();
@@ -164,6 +170,12 @@ void ObjLocDataLayer<Dtype>::Forward_cpu(
                this->prefetch_bboxes_.cpu_data(),
                top[2]->mutable_cpu_data());
   }
+  if (this->output_num_bboxes_) {
+    top[3]->ReshapeLike(this->prefetch_num_bboxes_);
+    caffe_copy(this->prefetch_num_bboxes_.count(),
+               this->prefetch_num_bboxes_.cpu_data(),
+               top[3]->mutable_cpu_data());
+  }
   DLOG(INFO) << "Prefetch bboxes copied";
   // Start a new prefetch thread
   DLOG(INFO) << "CreatePrefetchThread";
@@ -198,12 +210,16 @@ void ObjLocDataLayer<Dtype>::InternalThreadEntry() {
   Dtype* top_data = this->prefetch_data_.mutable_cpu_data();
   Dtype* top_label = NULL;  // suppress warnings about uninitialized variables
   Dtype* top_bboxes = NULL;
+  Dtype* top_num_bboxes = NULL;
 
   if (this->output_labels_) {
     top_label = this->prefetch_label_.mutable_cpu_data();
   }
   if (this->output_bboxes_) {
     top_bboxes = this->prefetch_bboxes_.mutable_cpu_data();
+  }
+  if (this->output_num_bboxes_) {
+    top_num_bboxes = this->prefetch_num_bboxes_.mutable_cpu_data();
   }
   timer.Start();
   const bool is_shuffle_pool_full = (shuffle_pool_size > 1
@@ -240,6 +256,9 @@ void ObjLocDataLayer<Dtype>::InternalThreadEntry() {
     // Copy label.
     if (this->output_labels_) {
       top_label[item_id] = datum.label();
+    }
+    if (this->output_num_bboxes_) {
+      top_num_bboxes[item_id] = datum.float_data_size() / 4;
     }
     trans_time += timer.MicroSeconds();
     timer.Start();

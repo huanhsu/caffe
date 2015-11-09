@@ -479,7 +479,7 @@ void DataTransformer<Dtype>::TransformObjLoc(const Datum& datum,
     // Transform the cv::image into img, and max_num_bboxes_ * 4 floats
     // into bboxes.
     const float* bboxes_data = datum.float_data().data();
-    TransformObjLoc(cv_img, datum.float_data_size() / 4, bboxes_data,
+    return TransformObjLoc(cv_img, datum.float_data_size() / 4, bboxes_data,
         transformed_img_blob, transformed_bboxes_blob);
   } else {
     if (param_.force_color() || param_.force_gray()) {

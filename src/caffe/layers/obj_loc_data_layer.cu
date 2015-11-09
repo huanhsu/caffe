@@ -29,6 +29,12 @@ void ObjLocDataLayer<Dtype>::Forward_gpu(
                this->prefetch_bboxes_.cpu_data(),
                top[2]->mutable_gpu_data());
   }
+  if (this->output_num_bboxes_) {
+    top[3]->ReshapeLike(this->prefetch_num_bboxes_);
+    caffe_copy(this->prefetch_num_bboxes_.count(),
+               this->prefetch_num_bboxes_.cpu_data(),
+               top[3]->mutable_gpu_data());
+  }
   // Start a new prefetch thread
   this->CreatePrefetchThread();
 }

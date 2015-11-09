@@ -119,7 +119,7 @@ class ObjLocDataLayer : public BasePrefetchingDataLayer<Dtype> {
   virtual inline const char* type() const { return "ObjLocData"; }
   virtual inline int ExactNumBottomBlobs() const { return 0; }
   virtual inline int MinTopBlobs() const { return 1; }
-  virtual inline int MaxTopBlobs() const { return 3; }
+  virtual inline int MaxTopBlobs() const { return 4; }
 
  protected:
   virtual void InternalThreadEntry();
@@ -131,9 +131,11 @@ class ObjLocDataLayer : public BasePrefetchingDataLayer<Dtype> {
   vector<int> shuffle_pool_index_;
 
   bool output_bboxes_;
+  bool output_num_bboxes_;
   int max_num_bboxes_;
   Blob<Dtype> prefetch_bboxes_;
   Blob<Dtype> transformed_bboxes_;
+  Blob<Dtype> prefetch_num_bboxes_;
 };
 
 /**
