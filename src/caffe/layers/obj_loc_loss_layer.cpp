@@ -71,6 +71,7 @@ void ObjLocLossLayer<Dtype>::LayerSetUp(
     reg_loss_bottom_vec_.clear();
     reg_loss_bottom_vec_.push_back(&pred_);
     reg_loss_bottom_vec_.push_back(&gt_);
+    reg_loss_top_vec_.clear();
     reg_loss_top_vec_.push_back(top[0]);
     reg_loss_layer_->SetUp(reg_loss_bottom_vec_, reg_loss_top_vec_);
   } else {

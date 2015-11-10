@@ -41,6 +41,7 @@ bool HasMatchingBBox(
 template <typename Dtype>
 void ObjLocAccuracyLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  top_k_ = this->layer_param_.accuracy_param().top_k();
   iou_threshold_ = this->layer_param_.accuracy_param().iou_threshold();
 }
 
@@ -54,6 +55,12 @@ void ObjLocAccuracyLayer<Dtype>::Reshape(
   CHECK_EQ(bottom[2]->width(), 4);
   CHECK_EQ(bottom[3]->num(), bottom[0]->num());
   CHECK_EQ(bottom[3]->channels(), 1);
+  if (bottom.size() == 5) {
+    CHECK_EQ(bottom[4]->num(), bottom[0]->num());
+    CHECK_EQ(bottom[4]->channels(), 1);
+    CHECK_EQ(bottom[4]->height(), top_k_);
+    CHECK_EQ(bottom[4]->width(), 1);
+  }
   vector<int> top_shape(0);  // Accuracy is a scalar; 0 axes.
   top[0]->Reshape(top_shape);
 }
@@ -69,17 +76,34 @@ void ObjLocAccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* candidates = bottom[2]->cpu_data();
   // candidates num, N x 1
   const Dtype* num_candidates = bottom[3]->cpu_data();
-  // Get the bbox for the target category
   const int num = bottom[0]->num();
   const int dim = bottom[0]->count() / num;
   const int max_num_bboxes = bottom[2]->height();
   Dtype accuracy = 0;
-  for (int i = 0; i < num; ++i) {
-    const int label_value = static_cast<int>(label[i]);
-    accuracy += HasMatchingBBox(
-        static_cast<int>(num_candidates[i]),
-        candidates + i * max_num_bboxes * 4,
-        pcr + i * dim + label_value * 4, iou_threshold_);
+  if (bottom.size() == 4) {
+    // Get the bbox for the target category
+    for (int i = 0; i < num; ++i) {
+      const int label_value = static_cast<int>(label[i]);
+      accuracy += HasMatchingBBox(
+          static_cast<int>(num_candidates[i]),
+          candidates + i * max_num_bboxes * 4,
+          pcr + i * dim + label_value * 4, iou_threshold_);
+    }
+  } else {
+    // Get the bbox for each predicted category
+    // Top-k classification prediction, N x 1 x K x 1
+    const Dtype* top_k_pred = bottom[4]->cpu_data();
+    for (int i = 0; i < num; ++i) {
+      const int label_value = static_cast<int>(label[i]);
+      for (int k = 0; k < top_k_; ++k) {
+        const int pred_label = static_cast<int>(top_k_pred[i * top_k_ + k]);
+        if (pred_label != label_value) continue;
+        accuracy += HasMatchingBBox(
+            static_cast<int>(num_candidates[i]),
+            candidates + i * max_num_bboxes * 4,
+            pcr + i * dim + pred_label * 4, iou_threshold_);
+      }
+    }
   }
   top[0]->mutable_cpu_data()[0] = accuracy / num;
 }
