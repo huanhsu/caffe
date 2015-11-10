@@ -66,6 +66,7 @@ void ObjLocLossLayer<Dtype>::LayerSetUp(
   if (loss_type == "Smooth L1") {
     LayerParameter smooth_l1_param(this->layer_param_);
     smooth_l1_param.set_type("SmoothL1Loss");
+    smooth_l1_param.mutable_loss_param()->set_normalize(false);
     reg_loss_layer_ = LayerRegistry<Dtype>::CreateLayer(smooth_l1_param);
     reg_loss_bottom_vec_.clear();
     reg_loss_bottom_vec_.push_back(&pred_);
@@ -136,27 +137,6 @@ void ObjLocLossLayer<Dtype>::Forward_cpu(
       gt_data[offset++] = candidates[i * max_num_bboxes * 4 + match_id * 4 + j];
     }
   }
-  // // Debug outputs
-  // if (Caffe::mpi_rank() == 0) {
-  //   for (int i = 0; i < num; ++i) {
-  //     printf("#%d\n", i);
-  //     printf("Pred:\n");
-  //     printf("%.5lf %.5lf %.5lf %.5lf\n", pred_data[i * 4], pred_data[i * 4 + 1], pred_data[i * 4 + 2], pred_data[i * 4 + 3]);
-  //     printf("Cand:\n");
-  //     const int num = static_cast<int>(num_candidates[i]);
-  //     printf("%.5lf\n", num_candidates[i]);
-  //     for (int j = 0; j < num; ++j) {
-  //       printf("%.5lf %.5lf %.5lf %.5lf\n",
-  //           candidates[i * max_num_bboxes * 4 + j * 4],
-  //           candidates[i * max_num_bboxes * 4 + j * 4 + 1],
-  //           candidates[i * max_num_bboxes * 4 + j * 4 + 2],
-  //           candidates[i * max_num_bboxes * 4 + j * 4 + 3]);
-  //     }
-  //     printf("GT:\n");
-  //     printf("%.5lf %.5lf %.5lf %.5lf\n", gt_data[i * 4], gt_data[i * 4 + 1], gt_data[i * 4 + 2], gt_data[i * 4 + 3]);
-  //   }
-  //   printf("\n");
-  // }
   // The forward pass of the regression loss layer
   reg_loss_layer_->Forward(reg_loss_bottom_vec_, reg_loss_top_vec_);
 }
@@ -173,6 +153,11 @@ void ObjLocLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
                << " Layer cannot backpropagate to ground truth bboxes.";
   }
   if (propagate_down[0]) {
+    vector<bool> reg_loss_propagate_down;
+    reg_loss_propagate_down.push_back(true);
+    reg_loss_propagate_down.push_back(false);
+    reg_loss_layer_->Backward(reg_loss_top_vec_, reg_loss_propagate_down,
+        reg_loss_bottom_vec_);
     const int num = bottom[0]->num();
     const int dim = bottom[0]->count() / num;
     Dtype* pcr_diff = bottom[0]->mutable_cpu_diff();
@@ -185,9 +170,6 @@ void ObjLocLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
         pcr_diff[i * dim + label_value * 4 + j] = pred_diff[i * 4 + j];
       }
     }
-    // Scale gradient
-    const Dtype loss_weight = top[0]->cpu_diff()[0];
-    caffe_scal(bottom[0]->count(), loss_weight / num, pcr_diff);
   }
 }
 

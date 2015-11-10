@@ -1024,6 +1024,8 @@ void Net<Dtype>::DetermineLayerParallelOrSerial(const NetParameter& param) {
         layer_type == "SigmoidCrossEntropyLoss" ||
         layer_type == "InfogainLoss" ||
         layer_type == "Accuracy" ||
+        layer_type == "ObjLocLoss" ||
+        layer_type == "ObjLocAccuracy" ||
         layer_type == "MPIGather") {
       serial_layers_.insert(layer_name);
     }
