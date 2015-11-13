@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
   gflags::SetUsageMessage("Convert a set of images to the leveldb/lmdb\n"
         "format used as input for Caffe.\n"
         "Usage:\n"
-        "    convert_objlocset [FLAGS] ROOTFOLDER/ LISTFILE DB_NAME\n"
+        "    convert_objlocset [FLAGS] ROOTFOLDER/ LISTFILE DB_NAME FOLDER\n"
         "The ImageNet dataset for the training demo is at\n"
         "    http://www.image-net.org/download-images\n");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -204,6 +204,15 @@ int main(int argc, char** argv) {
       txn->Commit();
       txn.reset(db->NewTransaction());
       LOG(ERROR) << "Processed " << count << " files.";
+    }
+
+    // Save to image folder
+    if (argc == 5) {
+      const string& img_folder = argv[4];
+      const std::string& data = datum.data();
+      std::ofstream img_file((img_folder + "/" + item.filename).c_str(),
+          std::ios::out | std::ios::binary);
+      img_file.write(data.c_str(), data.length());
     }
   }
   // write the last batch

@@ -640,8 +640,8 @@ void DataTransformer<Dtype>::TransformObjLoc(
   Dtype* transformed_bboxes_data = transformed_bboxes_blob->mutable_cpu_data();
   const float top_x = w_off + width / 2;
   const float top_y = h_off + height / 2;
-  const float log_width_scale = log(img_width / width);
-  const float log_height_scale = log(img_height / height);
+  const float log_width_scale = log(img_width * 1.0 / width);
+  const float log_height_scale = log(img_height * 1.0 / height);
   for (int bbox_id = 0; bbox_id < num_bboxes; ++bbox_id) {
     float x = bboxes_data[bbox_id * 4];
     float y = bboxes_data[bbox_id * 4 + 1];
@@ -757,8 +757,8 @@ void DataTransformer<Dtype>::TransformObjLoc(const Datum& datum,
   // the random cropped input bbox.
   const float top_x = w_off + width / 2;
   const float top_y = h_off + height / 2;
-  const float log_width_scale = log(datum_width / width);
-  const float log_height_scale = log(datum_height / height);
+  const float log_width_scale = log(datum_width * 1.0 / width);
+  const float log_height_scale = log(datum_height * 1.0 / height);
   const int num_bboxes = datum.float_data_size() / 4;
   const float* bboxes_data = datum.float_data().data();
   for (int bbox_id = 0; bbox_id < num_bboxes; ++bbox_id) {
