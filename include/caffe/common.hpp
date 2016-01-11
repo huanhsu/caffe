@@ -155,6 +155,13 @@ class Caffe {
   inline static int mpi_initialized() { return Get().mpi_initialized_; }
 #endif
 
+#ifdef USE_CUDNN
+  inline static int cudnn_mem_richness() { return Get().cudnn_mem_richness_; }
+  inline static void set_cudnn_mem_richness(int richness) {
+    Get().cudnn_mem_richness_ = richness;
+  }
+#endif
+
  protected:
 #ifndef CPU_ONLY
   cublasHandle_t cublas_handle_;
@@ -169,6 +176,10 @@ class Caffe {
   int mpi_rank_;
   int mpi_size_;
   int mpi_initialized_;
+#endif
+
+#ifdef USE_CUDNN
+  int cudnn_mem_richness_;
 #endif
 
  private:
