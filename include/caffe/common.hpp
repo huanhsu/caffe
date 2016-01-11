@@ -150,6 +150,13 @@ class Caffe {
   // Prints the current GPU status.
   static void DeviceQuery();
 
+#ifdef USE_CUDNN
+  inline static int cudnn_mem_richness() { return Get().cudnn_mem_richness_; }
+  inline static void set_cudnn_mem_richness(int richness) {
+    Get().cudnn_mem_richness_ = richness;
+  }
+#endif
+
  protected:
 #ifndef CPU_ONLY
   cublasHandle_t cublas_handle_;
@@ -159,6 +166,10 @@ class Caffe {
 
   Brew mode_;
   static shared_ptr<Caffe> singleton_;
+
+#ifdef USE_CUDNN
+  int cudnn_mem_richness_;
+#endif
 
  private:
   // The private constructor to avoid duplicate instantiation.
