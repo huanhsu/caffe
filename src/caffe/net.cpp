@@ -9,6 +9,7 @@
 
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
+#include "caffe/vision_layers.hpp"
 #include "caffe/net.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/hdf5.hpp"
@@ -17,7 +18,7 @@
 #include "caffe/util/upgrade_proto.hpp"
 #include "caffe/util/mpi_templates.hpp"
 #include "caffe/util/insert_gathers.hpp"
-#include "caffe/vision_layers.hpp"
+#include "caffe/util/mpi_job_queue.hpp"
 
 #include "caffe/test/test_caffe_main.hpp"
 
@@ -621,7 +622,7 @@ string Net<Dtype>::Forward(const string& input_blob_protos, Dtype* loss) {
 }
 
 template <typename Dtype>
-void Net<Dtype>::BackwardFromTo(int start, int end) {
+void Net<Dtype>::BackwardFromTo(int start, int end, int remaining_sub_iter) {
   CHECK_GE(end, 0);
   CHECK_LT(start, layers_.size());
   for (int i = start; i >= end; --i) {
@@ -629,6 +630,31 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
       layers_[i]->Backward(
           top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
       if (debug_info_) { BackwardDebugInfo(i); }
+#ifdef USE_MPI
+      // Sync the gradients by pushing to the mpi job queue.
+      if (serial_layers_.find(layers_[i]->layer_param().name()) !=
+          serial_layers_.end()) continue;
+      if (Caffe::mpi_size() <= 1 || remaining_sub_iter > 0) continue;
+      for (int n = 0; n < param_layer_indices_.size(); ++n) {
+        bool ready_for_sync = false;
+        if ((param_layer_indices_[n].first == i)) {
+          ready_for_sync = true;
+          if (param_owners_[n] != -1) {
+            int owner_id = param_owners_[n];
+            for (int m = n - 1; m >= 0; --m) {
+              if (param_owners_[m] == owner_id &&
+                  param_layer_indices_[m].first >= end) {
+                ready_for_sync = false;
+                break;
+              }
+            }
+          }
+        }
+        if (!ready_for_sync) continue;
+        MPIJobQueue<Dtype>::PushSumAll(
+            this->params_[n]->count(), this->params_[n]->mutable_cpu_diff());
+      }
+#endif
     }
   }
 }
@@ -739,18 +765,18 @@ void Net<Dtype>::ShareTrainedLayersWith(const Net* other) {
 }
 
 template <typename Dtype>
-void Net<Dtype>::BackwardFrom(int start) {
-  BackwardFromTo(start, 0);
+void Net<Dtype>::BackwardFrom(int start, int remaining_sub_iter) {
+  BackwardFromTo(start, 0, remaining_sub_iter);
 }
 
 template <typename Dtype>
-void Net<Dtype>::BackwardTo(int end) {
-  BackwardFromTo(layers_.size() - 1, end);
+void Net<Dtype>::BackwardTo(int end, int remaining_sub_iter) {
+  BackwardFromTo(layers_.size() - 1, end, remaining_sub_iter);
 }
 
 template <typename Dtype>
-void Net<Dtype>::Backward() {
-  BackwardFromTo(layers_.size() - 1, 0);
+void Net<Dtype>::Backward(int remaining_sub_iter) {
+  BackwardFromTo(layers_.size() - 1, 0, remaining_sub_iter);
   if (debug_info_) {
     Dtype asum_data = 0, asum_diff = 0, sumsq_data = 0, sumsq_diff = 0;
     for (int i = 0; i < params_.size(); ++i) {

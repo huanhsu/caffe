@@ -15,6 +15,7 @@
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 #include "caffe/util/mpi_templates.hpp"
+#include "caffe/util/mpi_job_queue.hpp"
 
 namespace caffe {
 
@@ -510,25 +511,11 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
   }
-
 #ifdef USE_MPI
   if (Caffe::mpi_size() > 1) {
-    // Accumulate and average the gradients of parameters of parallel layers.
-    const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
-    const vector<shared_ptr<Layer<Dtype> > >& net_layers = this->net_->layers();
-    const vector<pair<int, int> >& param_layer_indices =
-        this->net_->param_layer_indices();
-    const set<string>& serial_layers = this->net_->serial_layers();
-    for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
-      const int layer_id = param_layer_indices[param_id].first;
-      const string& layer_name = net_layers[layer_id]->layer_param().name();
-      if (serial_layers.find(layer_name) != serial_layers.end()) continue;
-      MPIAllreduce<Dtype>(net_params[param_id]->count(), MPI_IN_PLACE,
-          net_params[param_id]->mutable_cpu_diff(), MPI_SUM);
-    }
+    MPIJobQueue<Dtype>::Synchronize();
   }
 #endif
-
   ClipGradients();
   for (int param_id = 0; param_id < this->net_->learnable_params().size();
        ++param_id) {
