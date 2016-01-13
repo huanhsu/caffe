@@ -87,9 +87,7 @@ void Solver<Dtype>::InitTrainNet() {
   net_param.mutable_state()->CopyFrom(net_state);
   net_.reset(new Net<Dtype>(net_param));
 #ifdef USE_MPI
-  if (Caffe::mpi_size() > 1) {
-    net_->SyncData();
-  }
+  net_->SyncData();
 #endif
 }
 
@@ -167,9 +165,7 @@ void Solver<Dtype>::InitTestNets() {
     test_nets_[i].reset(new Net<Dtype>(net_params[i]));
     test_nets_[i]->set_debug_info(param_.debug_info());
 #ifdef USE_MPI
-    if (Caffe::mpi_size() > 1) {
-      test_nets_[i]->SyncData();
-    }
+    test_nets_[i]->SyncData();
 #endif
   }
 }
@@ -202,6 +198,14 @@ void Solver<Dtype>::Step(int iters) {
       loss += net_->ForwardBackward(bottom_vec, param_.iter_size() - i - 1);
     }
     loss /= param_.iter_size();
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      net_->SyncDiff();
+      net_->SyncOutput();
+      MPIAllreduce<Dtype>(1, MPI_IN_PLACE, &loss, MPI_SUM);
+      loss /= Caffe::mpi_size();
+    }
+#endif
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {
       losses.push_back(loss);
@@ -217,8 +221,6 @@ void Solver<Dtype>::Step(int iters) {
       const vector<Blob<Dtype>*>& result = net_->output_blobs();
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
-        /// TODO: Check whether the result is an output of a parallel layer.
-        /// If so, average across MPI processes.
         const Dtype* result_vec = result[j]->cpu_data();
         const string& output_name =
             net_->blob_names()[net_->output_blob_indices()[j]];
@@ -517,11 +519,6 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
   }
-#ifdef USE_MPI
-  if (Caffe::mpi_size() > 1) {
-    MPIJobQueue<Dtype>::Synchronize();
-  }
-#endif
   ClipGradients();
   for (int param_id = 0; param_id < this->net_->learnable_params().size();
        ++param_id) {

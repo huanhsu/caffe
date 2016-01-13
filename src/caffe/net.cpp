@@ -1053,6 +1053,7 @@ const shared_ptr<Layer<Dtype> > Net<Dtype>::layer_by_name(
 #ifdef USE_MPI
 template <typename Dtype>
 void Net<Dtype>::SyncData() {
+  if (Caffe::mpi_size() <= 1) return;
   for (int i = 0; i < learnable_params_.size(); ++i) {
     Blob<Dtype>* param = learnable_params_[i];
     MPIBcast<Dtype>(param->count(), param->mutable_cpu_data());
@@ -1061,9 +1062,27 @@ void Net<Dtype>::SyncData() {
 
 template <typename Dtype>
 void Net<Dtype>::SyncDiff() {
-  for (int i = 0; i < learnable_params_.size(); ++i) {
-    Blob<Dtype>* param = learnable_params_[i];
-    MPIBcast<Dtype>(param->count(), param->mutable_cpu_diff());
+  if (Caffe::mpi_size() <= 1) return;
+  MPIJobQueue<Dtype>::Synchronize();
+  for (int param_id = 0; param_id < params_.size(); ++param_id) {
+    int param_owner = param_owners_[param_id];
+    if (param_owner != -1 && param_owner != param_id) continue;
+    int layer_id = param_layer_indices_[param_id].first;
+    const string& layer_name = layers_[layer_id]->layer_param().name();
+    if (serial_layers_.find(layer_name) != serial_layers_.end()) continue;
+    caffe_scal(params_[param_id]->count(), Dtype(1. / Caffe::mpi_size()),
+               params_[param_id]->mutable_cpu_diff());
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::SyncOutput() {
+  if (Caffe::mpi_size() <= 1) return;
+  for (int i = 0; i < net_output_blobs_.size(); ++i) {
+    MPIAllreduce<Dtype>(net_output_blobs_[i]->count(), MPI_IN_PLACE,
+                        net_output_blobs_[i]->mutable_cpu_data(), MPI_SUM);
+    caffe_scal(net_output_blobs_[i]->count(), Dtype(1. / Caffe::mpi_size()),
+               net_output_blobs_[i]->mutable_cpu_data());
   }
 }
 

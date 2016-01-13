@@ -32,7 +32,7 @@ void MPIGatherLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   for (int i = 0; i < bottom.size(); ++i) {
     if (Caffe::mpi_size() > 1) {
-      MPIGather<Dtype>(bottom[i]->count(), bottom[i]->cpu_data(),
+      MPIAllgather<Dtype>(bottom[i]->count(), bottom[i]->cpu_data(),
           top[i]->mutable_cpu_data());
     } else {
       top[i]->ShareData(*bottom[i]);
@@ -47,6 +47,8 @@ void MPIGatherLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     if (Caffe::mpi_size() > 1) {
       MPIScatter<Dtype>(bottom[i]->count(), top[i]->cpu_diff(),
           bottom[i]->mutable_cpu_diff());
+      caffe_scal(bottom[i]->count(), Dtype(Caffe::mpi_size()),
+                 bottom[i]->mutable_cpu_diff());
     } else {
       bottom[i]->ShareDiff(*top[i]);
     }

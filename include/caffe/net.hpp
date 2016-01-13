@@ -123,6 +123,7 @@ class Net {
   // Synchronize the parameters of each layer among all the MPI processors.
   void SyncData();
   void SyncDiff();
+  void SyncOutput();
 #endif
 
   /// @brief returns the network name.
