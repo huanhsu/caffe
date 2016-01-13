@@ -44,6 +44,7 @@ private:
 
   std::queue<MPIJobQueue<Dtype>::Job> queue_;
   mutable boost::mutex queue_mutex_;
+  boost::atomic<bool> is_running_;
   boost::atomic<bool> thread_started_;
   boost::shared_ptr<boost::thread> thread_;
   boost::condition_variable cv_work_;

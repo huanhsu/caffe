@@ -6,6 +6,7 @@
 
 
 using boost::mutex;
+using boost::lock_guard;
 
 namespace caffe {
 
@@ -17,8 +18,10 @@ MPIJobQueue<Dtype>& MPIJobQueue<Dtype>::instance() {
 
 template <typename Dtype>
 MPIJobQueue<Dtype>::MPIJobQueue()
-  : thread_started_(false) {
+  : is_running_(false),
+    thread_started_(false) {
   try {
+    is_running_.store(true);
     thread_.reset(new boost::thread(&MPIJobQueue<Dtype>::ThreadFunc, this));
   } catch (...) {
     LOG(FATAL) << "Failed to start MPI job queue thread.";
@@ -28,6 +31,7 @@ MPIJobQueue<Dtype>::MPIJobQueue()
 template <typename Dtype>
 MPIJobQueue<Dtype>::~MPIJobQueue<Dtype>() {
   try {
+    is_running_.store(false);
     cv_work_.notify_one();
     thread_->join();
   } catch (...) {
@@ -40,15 +44,24 @@ void MPIJobQueue<Dtype>::ThreadFunc() {
   thread_started_.store(true);
   while (true) {
     mutex::scoped_lock read_lock(queue_mutex_);
-    while (queue_.empty()) {
+    while (queue_.empty() && is_running_) {
       cv_work_.wait(read_lock);
     }
     read_lock.unlock();
+
+    if (!is_running_) break;
 
     Dispatch(queue_.front());
     mutex::scoped_lock write_lock(queue_mutex_);
     queue_.pop();
     write_lock.unlock();
+    cv_done_.notify_one();
+  }
+
+  while (!queue_.empty()) {
+    lock_guard<mutex> lk(queue_mutex_);
+    Dispatch(queue_.front());
+    queue_.pop();
     cv_done_.notify_one();
   }
 }
