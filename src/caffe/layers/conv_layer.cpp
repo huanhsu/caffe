@@ -32,7 +32,6 @@ void ConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       }
     }
   }
-  printf("conv forward: %.6lf\n", top[0]->asum_data() / top[0]->count());
 }
 
 template <typename Dtype>
@@ -66,7 +65,6 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       }
     }
   }
-  printf("conv backward: %.6lf\n", this->blobs_[0]->asum_diff() / this->blobs_[0]->count());
 }
 
 #ifdef CPU_ONLY
