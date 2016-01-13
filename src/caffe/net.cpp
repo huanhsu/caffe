@@ -1052,13 +1052,18 @@ const shared_ptr<Layer<Dtype> > Net<Dtype>::layer_by_name(
 
 #ifdef USE_MPI
 template <typename Dtype>
-void Net<Dtype>::SyncLayers() {
-  for (int i = 0; i < layers_.size(); ++i) {
-    vector<shared_ptr<Blob<Dtype> > >& blobs = layers_[i]->blobs();
-    for (int j = 0; j < blobs.size(); ++j) {
-      MPIBcast<Dtype>(blobs[j]->count(), blobs[j]->mutable_cpu_data());
-      MPIBcast<Dtype>(blobs[j]->count(), blobs[j]->mutable_cpu_diff());
-    }
+void Net<Dtype>::SyncData() {
+  for (int i = 0; i < learnable_params_.size(); ++i) {
+    Blob<Dtype>* param = learnable_params_[i];
+    MPIBcast<Dtype>(param->count(), param->mutable_cpu_data());
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::SyncDiff() {
+  for (int i = 0; i < learnable_params_.size(); ++i) {
+    Blob<Dtype>* param = learnable_params_[i];
+    MPIBcast<Dtype>(param->count(), param->mutable_cpu_diff());
   }
 }
 
@@ -1122,7 +1127,6 @@ void Net<Dtype>::DetermineLayerParallelOrSerial(const NetParameter& param) {
     }
   }
 }
-
 #endif
 
 INSTANTIATE_CLASS(Net);

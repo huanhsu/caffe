@@ -121,7 +121,8 @@ class Net {
 
 #ifdef USE_MPI
   // Synchronize the parameters of each layer among all the MPI processors.
-  void SyncLayers();
+  void SyncData();
+  void SyncDiff();
 #endif
 
   /// @brief returns the network name.

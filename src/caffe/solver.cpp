@@ -88,7 +88,7 @@ void Solver<Dtype>::InitTrainNet() {
   net_.reset(new Net<Dtype>(net_param));
 #ifdef USE_MPI
   if (Caffe::mpi_size() > 1) {
-    net_->SyncLayers();
+    net_->SyncData();
   }
 #endif
 }
@@ -168,7 +168,7 @@ void Solver<Dtype>::InitTestNets() {
     test_nets_[i]->set_debug_info(param_.debug_info());
 #ifdef USE_MPI
     if (Caffe::mpi_size() > 1) {
-      test_nets_[i]->SyncLayers();
+      test_nets_[i]->SyncData();
     }
 #endif
   }
@@ -188,6 +188,9 @@ void Solver<Dtype>::Step(int iters) {
     net_->ClearParamDiffs();
     if (param_.test_interval() && iter_ % param_.test_interval() == 0
         && (iter_ > 0 || param_.test_initialization())) {
+#ifdef USE_MPI
+      net_->SyncData();
+#endif
       TestAll();
     }
 
@@ -196,7 +199,7 @@ void Solver<Dtype>::Step(int iters) {
     // accumulate the loss and gradient
     Dtype loss = 0;
     for (int i = 0; i < param_.iter_size(); ++i) {
-      loss += net_->ForwardBackward(bottom_vec);
+      loss += net_->ForwardBackward(bottom_vec, param_.iter_size() - i - 1);
     }
     loss /= param_.iter_size();
     // average the loss across iterations for smoothed reporting
@@ -277,6 +280,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
+#ifdef USE_MPI
+    net_->SyncData();
+#endif
     TestAll();
   }
   LOG(INFO) << "Optimization Done.";
