@@ -14,7 +14,7 @@ namespace bp = boost::python;
 
 #include "boost/algorithm/string.hpp"
 #include "caffe/caffe.hpp"
-#include "caffe/util/mpi_templates.hpp"
+#include "caffe/util/mpi_job_queue.hpp"
 
 using caffe::Blob;
 using caffe::Caffe;
@@ -24,6 +24,7 @@ using caffe::shared_ptr;
 using caffe::Timer;
 using caffe::vector;
 using caffe::caffe_scal;
+using caffe::MPIJobQueue;
 
 
 DEFINE_string(gpu, "",
@@ -72,7 +73,17 @@ static BrewFunction GetBrewFunction(const caffe::string& name) {
 
 static std::vector<int> GetDevicesFromFlag() {
   std::vector<int> gpus;
-  if (FLAGS_gpu != "") {
+  if (FLAGS_gpu == "all") {
+    int count = 0;
+#ifndef CPU_ONLY
+    CUDA_CHECK(cudaGetDeviceCount(&count));
+#else
+    NO_GPU;
+#endif
+    for (int i = 0; i < count; ++i) {
+      gpus.push_back(i);
+    }
+  } else if (FLAGS_gpu != "") {
     std::vector<std::string> gpus_str;
     boost::split(gpus_str, FLAGS_gpu, boost::is_any_of(","));
     for (int i = 0; i < gpus_str.size(); ++i) {
@@ -222,6 +233,14 @@ int test() {
     float iter_loss;
     const vector<Blob<float>*>& result =
         caffe_net.Forward(bottom_vec, &iter_loss);
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      caffe_net.SyncOutput();
+      MPIJobQueue<float>::PushSumAll(1, &iter_loss);
+      MPIJobQueue<float>::Synchronize();
+      iter_loss /= Caffe::mpi_size();
+    }
+#endif
     loss += iter_loss;
     int idx = 0;
     for (int j = 0; j < result.size(); ++j) {
@@ -313,17 +332,11 @@ int time() {
   total_timer.Start();
   Timer forward_timer;
   Timer backward_timer;
-  Timer comm_timer;
   Timer timer;
   std::vector<double> forward_time_per_layer(layers.size(), 0.0);
   std::vector<double> backward_time_per_layer(layers.size(), 0.0);
-  std::vector<double> comm_time_per_layer(layers.size(), 0.0);
   double forward_time = 0.0;
   double backward_time = 0.0;
-#ifdef USE_MPI
-  const std::set<std::string>& serial_layers = caffe_net.serial_layers();
-  double comm_time = 0.0;
-#endif
   for (int j = 0; j < FLAGS_iterations; ++j) {
     Timer iter_timer;
     iter_timer.Start();
@@ -342,34 +355,8 @@ int time() {
       backward_time_per_layer[i] += timer.MicroSeconds();
     }
     backward_time += backward_timer.MicroSeconds();
-#ifdef USE_MPI
-    if (Caffe::mpi_size() > 1) {
-      comm_timer.Start();
-      for (int i = layers.size() - 1; i >= 0; --i) {
-        if (serial_layers.find(layers[i]->layer_param().name()) !=
-            serial_layers.end()) {
-          comm_time_per_layer[i] = 0;
-          continue;
-        }
-        const vector<shared_ptr<Blob<float> > >& blobs = layers[i]->blobs();
-        timer.Start();
-        for (int j = 0; j < blobs.size(); ++j) {
-          if (Caffe::mpi_size() == 1) continue;
-          MPIAllreduce<float>(blobs[j]->count(), MPI_IN_PLACE,
-              blobs[j]->mutable_cpu_diff(), MPI_SUM);
-          caffe_scal(blobs[j]->count(), 1.0f / Caffe::mpi_size(),
-              blobs[j]->mutable_cpu_diff());
-        }
-        comm_time_per_layer[i] += timer.MicroSeconds();
-      }
-      comm_time += comm_timer.MicroSeconds();
-    }
-    LOG(INFO) << "Iteration: " << j + 1 << " forward-backward-comm time: "
-      << iter_timer.MilliSeconds() << " ms.";
-#else
     LOG(INFO) << "Iteration: " << j + 1 << " forward-backward time: "
       << iter_timer.MilliSeconds() << " ms.";
-#endif
   }
   LOG(INFO) << "Average time per layer: ";
   for (int i = 0; i < layers.size(); ++i) {
@@ -380,26 +367,14 @@ int time() {
     LOG(INFO) << std::setfill(' ') << std::setw(10) << layername <<
       "\tbackward: " << backward_time_per_layer[i] / 1000 /
       FLAGS_iterations << " ms.";
-#ifdef USE_MPI
-    LOG(INFO) << std::setfill(' ') << std::setw(10) << layername <<
-      "\tcomm: " << comm_time_per_layer[i] / 1000 /
-      FLAGS_iterations << " ms.";
-#endif
   }
   total_timer.Stop();
   LOG(INFO) << "Average Forward pass: " << forward_time / 1000 /
     FLAGS_iterations << " ms.";
   LOG(INFO) << "Average Backward pass: " << backward_time / 1000 /
     FLAGS_iterations << " ms.";
-#ifdef USE_MPI
-  LOG(INFO) << "Average Comm pass: " << comm_time / 1000 /
-    FLAGS_iterations << " ms.";
-  LOG(INFO) << "Average Forward-Backward-Comm: " << total_timer.MilliSeconds() /
-    FLAGS_iterations << " ms.";
-#else
   LOG(INFO) << "Average Forward-Backward: " << total_timer.MilliSeconds() /
     FLAGS_iterations << " ms.";
-#endif
   LOG(INFO) << "Total Time: " << total_timer.MilliSeconds() << " ms.";
   LOG(INFO) << "*** Benchmark ends ***";
   return 0;

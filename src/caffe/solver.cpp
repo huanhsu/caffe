@@ -14,8 +14,9 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
-#include "caffe/util/mpi_templates.hpp"
 #include "caffe/util/mpi_job_queue.hpp"
+
+#include "mpi.h"
 
 namespace caffe {
 
@@ -202,7 +203,8 @@ void Solver<Dtype>::Step(int iters) {
     if (Caffe::mpi_size() > 1) {
       net_->SyncDiff();
       net_->SyncOutput();
-      MPIAllreduce<Dtype>(1, MPI_IN_PLACE, &loss, MPI_SUM);
+      MPIJobQueue<Dtype>::PushSumAll(1, &loss);
+      MPIJobQueue<Dtype>::Synchronize();
       loss /= Caffe::mpi_size();
     }
 #endif
@@ -269,6 +271,12 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   if (param_.snapshot_after_train()
       && (!param_.snapshot() || iter_ % param_.snapshot() != 0)) {
     Snapshot();
+#ifdef USE_MPI
+  if (Caffe::mpi_size() > 1) {
+    MPIJobQueue<Dtype>::Synchronize();
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif
   }
   // After the optimization is done, run an additional train and test pass to
   // display the train and test loss/outputs if appropriate (based on the
@@ -279,6 +287,13 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   if (param_.display() && iter_ % param_.display() == 0) {
     Dtype loss;
     net_->ForwardPrefilled(&loss);
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      MPIJobQueue<Dtype>::PushSumAll(1, &loss);
+      MPIJobQueue<Dtype>::Synchronize();
+      loss /= Caffe::mpi_size();
+    }
+#endif
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {

@@ -4,7 +4,7 @@
 #include "caffe/layer.hpp"
 #include "caffe/vision_layers.hpp"
 #include "caffe/util/math_functions.hpp"
-#include "caffe/util/mpi_templates.hpp"
+#include "caffe/util/mpi_job_queue.hpp"
 
 namespace caffe {
 
@@ -30,11 +30,14 @@ void MPIGatherLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void MPIGatherLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
-  for (int i = 0; i < bottom.size(); ++i) {
-    if (Caffe::mpi_size() > 1) {
-      MPIAllgather<Dtype>(bottom[i]->count(), bottom[i]->cpu_data(),
-          top[i]->mutable_cpu_data());
-    } else {
+  if (Caffe::mpi_size() > 1) {
+    for (int i = 0; i < bottom.size(); ++i) {
+      MPIJobQueue<Dtype>::PushAllgather(bottom[i]->count(),
+          bottom[i]->cpu_data(), top[i]->mutable_cpu_data());
+    }
+    MPIJobQueue<Dtype>::Synchronize();
+  } else {
+    for (int i = 0; i < bottom.size(); ++i) {
       top[i]->ShareData(*bottom[i]);
     }
   }
@@ -43,17 +46,26 @@ void MPIGatherLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void MPIGatherLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
-  for (int i = 0; i < bottom.size(); ++i) {
-    if (Caffe::mpi_size() > 1) {
-      MPIScatter<Dtype>(bottom[i]->count(), top[i]->cpu_diff(),
+  if (Caffe::mpi_size() > 1) {
+    for (int i = 0; i < bottom.size(); ++i) {
+      MPIJobQueue<Dtype>::PushScatter(bottom[i]->count(), top[i]->cpu_diff(),
           bottom[i]->mutable_cpu_diff());
+    }
+    MPIJobQueue<Dtype>::Synchronize();
+    for (int i = 0; i < bottom.size(); ++i) {
       caffe_scal(bottom[i]->count(), Dtype(Caffe::mpi_size()),
                  bottom[i]->mutable_cpu_diff());
-    } else {
+    }
+  } else {
+    for (int i = 0; i < bottom.size(); ++i) {
       bottom[i]->ShareDiff(*top[i]);
     }
   }
 }
+
+#ifdef CPU_ONLY
+STUB_GPU(MPIGatherLayer);
+#endif
 
 INSTANTIATE_CLASS(MPIGatherLayer);
 REGISTER_LAYER_CLASS(MPIGather);

@@ -13,7 +13,10 @@ template <typename Dtype>
 class MPIJobQueue {
 public:
   enum OperationType {
-    OP_SUM_ALL
+    OP_SUM_ALL,
+    OP_ALL_GATHER,
+    OP_SCATTER,
+    OP_BCAST
   };
 
   class Job {
@@ -32,6 +35,19 @@ public:
   inline static void PushSumAll(const int count, Dtype* data) {
     instance().Push(MPIJobQueue<Dtype>::Job(OP_SUM_ALL, count, data, data));
   }
+  inline static void PushAllgather(const int count,
+                                   const Dtype* from, Dtype* to) {
+    instance().Push(MPIJobQueue<Dtype>::Job(OP_ALL_GATHER, count,
+                                            const_cast<Dtype*>(from), to));
+  }
+  inline static void PushScatter(const int count,
+                                 const Dtype* from, Dtype* to) {
+    instance().Push(MPIJobQueue<Dtype>::Job(OP_SCATTER, count,
+                                            const_cast<Dtype*>(from), to));
+  }
+  inline static void PushBcast(const int count, Dtype* data) {
+    instance().Push(MPIJobQueue<Dtype>::Job(OP_BCAST, count, data, data));
+  }
 
 private:
   MPIJobQueue();
@@ -41,6 +57,8 @@ private:
   void WaitAll();
   void Push(const MPIJobQueue<Dtype>::Job& job);
   void Dispatch(MPIJobQueue<Dtype>::Job& job);
+
+  int device_id_;
 
   std::queue<MPIJobQueue<Dtype>::Job> queue_;
   mutable boost::mutex queue_mutex_;

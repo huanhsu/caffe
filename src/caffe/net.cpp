@@ -16,7 +16,6 @@
 #include "caffe/util/insert_splits.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
-#include "caffe/util/mpi_templates.hpp"
 #include "caffe/util/insert_gathers.hpp"
 #include "caffe/util/mpi_job_queue.hpp"
 
@@ -1056,8 +1055,9 @@ void Net<Dtype>::SyncData() {
   if (Caffe::mpi_size() <= 1) return;
   for (int i = 0; i < learnable_params_.size(); ++i) {
     Blob<Dtype>* param = learnable_params_[i];
-    MPIBcast<Dtype>(param->count(), param->mutable_cpu_data());
+    MPIJobQueue<Dtype>::PushBcast(param->count(), param->mutable_cpu_data());
   }
+  MPIJobQueue<Dtype>::Synchronize();
 }
 
 template <typename Dtype>
@@ -1070,8 +1070,13 @@ void Net<Dtype>::SyncDiff() {
     int layer_id = param_layer_indices_[param_id].first;
     const string& layer_name = layers_[layer_id]->layer_param().name();
     if (serial_layers_.find(layer_name) != serial_layers_.end()) continue;
+#ifndef CPU_ONLY
+    caffe_gpu_scal(params_[param_id]->count(), Dtype(1. / Caffe::mpi_size()),
+                   params_[param_id]->mutable_gpu_diff());
+#else
     caffe_scal(params_[param_id]->count(), Dtype(1. / Caffe::mpi_size()),
                params_[param_id]->mutable_cpu_diff());
+#endif
   }
 }
 
@@ -1079,8 +1084,11 @@ template <typename Dtype>
 void Net<Dtype>::SyncOutput() {
   if (Caffe::mpi_size() <= 1) return;
   for (int i = 0; i < net_output_blobs_.size(); ++i) {
-    MPIAllreduce<Dtype>(net_output_blobs_[i]->count(), MPI_IN_PLACE,
-                        net_output_blobs_[i]->mutable_cpu_data(), MPI_SUM);
+    MPIJobQueue<Dtype>::PushSumAll(net_output_blobs_[i]->count(),
+        net_output_blobs_[i]->mutable_cpu_data());
+  }
+  MPIJobQueue<Dtype>::Synchronize();
+  for (int i = 0; i < net_output_blobs_.size(); ++i) {
     caffe_scal(net_output_blobs_[i]->count(), Dtype(1. / Caffe::mpi_size()),
                net_output_blobs_[i]->mutable_cpu_data());
   }
