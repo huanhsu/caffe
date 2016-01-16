@@ -185,9 +185,6 @@ void Solver<Dtype>::Step(int iters) {
     net_->ClearParamDiffs();
     if (param_.test_interval() && iter_ % param_.test_interval() == 0
         && (iter_ > 0 || param_.test_initialization())) {
-#ifdef USE_MPI
-      net_->SyncData();
-#endif
       TestAll();
     }
 
@@ -297,9 +294,6 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
-#ifdef USE_MPI
-    net_->SyncData();
-#endif
     TestAll();
   }
   LOG(INFO) << "Optimization Done.";
@@ -307,6 +301,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
 template <typename Dtype>
 void Solver<Dtype>::TestAll() {
+#ifdef USE_MPI
+  net_->SyncData();
+#endif
   for (int test_net_id = 0; test_net_id < test_nets_.size(); ++test_net_id) {
     Test(test_net_id);
   }

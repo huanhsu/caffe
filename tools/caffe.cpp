@@ -398,7 +398,9 @@ int main(int argc, char** argv) {
 #ifdef WITH_PYTHON_LAYER
     try {
 #endif
-      return GetBrewFunction(caffe::string(argv[1]))();
+      int ret = GetBrewFunction(caffe::string(argv[1]))();
+      caffe::GlobalFinalize();
+      return ret;
 #ifdef WITH_PYTHON_LAYER
     } catch (bp::error_already_set) {
       PyErr_Print();
@@ -407,5 +409,6 @@ int main(int argc, char** argv) {
 #endif
   } else {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "tools/caffe");
+    caffe::GlobalFinalize();
   }
 }

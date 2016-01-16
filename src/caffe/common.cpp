@@ -41,9 +41,19 @@ void GlobalInit(int* pargc, char*** pargv) {
   // Provide a backtrace on segfault.
   ::google::InstallFailureSignalHandler();
 #ifdef USE_MPI
-  MPI_Init(pargc, pargv);
+  int provided_thread_support;
+  MPI_Init_thread(pargc, pargv, MPI_THREAD_MULTIPLE, &provided_thread_support);
+  CHECK_GE(provided_thread_support, MPI_THREAD_SERIALIZED)
+      << "Cannot activate MPI thread support.";
 #endif
 }
+
+void GlobalFinalize(){
+#ifdef USE_MPI
+  MPI_Finalize();
+#endif
+}
+
 
 #ifdef CPU_ONLY  // CPU-only Caffe.
 
@@ -62,11 +72,7 @@ Caffe::Caffe()
 #endif
 }
 
-Caffe::~Caffe() {
-#ifdef USE_MPI
-  if (mpi_initialized_) MPI_Finalize();
-#endif
-}
+Caffe::~Caffe() { }
 
 void Caffe::set_random_seed(const unsigned int seed) {
   // RNG seed
@@ -139,9 +145,6 @@ Caffe::~Caffe() {
   if (curand_generator_) {
     CURAND_CHECK(curandDestroyGenerator(curand_generator_));
   }
-#ifdef USE_MPI
-  if (mpi_initialized_) MPI_Finalize();
-#endif
 }
 
 void Caffe::set_random_seed(const unsigned int seed) {

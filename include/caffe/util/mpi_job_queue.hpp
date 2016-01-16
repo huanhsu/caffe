@@ -29,29 +29,34 @@ public:
     Dtype* dst_ptr;
   };
 
-  static MPIJobQueue<Dtype>& instance();
+  ~MPIJobQueue();
+  inline static MPIJobQueue<Dtype>& Get() {
+    if (!singleton_.get()) {
+      singleton_.reset(new MPIJobQueue<Dtype>());
+    }
+    return *singleton_;
+  }
 
-  inline static void Synchronize() { instance().WaitAll(); }
+  inline static void Synchronize() { Get().WaitAll(); }
   inline static void PushSumAll(const int count, Dtype* data) {
-    instance().Push(MPIJobQueue<Dtype>::Job(OP_SUM_ALL, count, data, data));
+    Get().Push(MPIJobQueue<Dtype>::Job(OP_SUM_ALL, count, data, data));
   }
   inline static void PushAllgather(const int count,
                                    const Dtype* from, Dtype* to) {
-    instance().Push(MPIJobQueue<Dtype>::Job(OP_ALL_GATHER, count,
+    Get().Push(MPIJobQueue<Dtype>::Job(OP_ALL_GATHER, count,
                                             const_cast<Dtype*>(from), to));
   }
   inline static void PushScatter(const int count,
                                  const Dtype* from, Dtype* to) {
-    instance().Push(MPIJobQueue<Dtype>::Job(OP_SCATTER, count,
+    Get().Push(MPIJobQueue<Dtype>::Job(OP_SCATTER, count,
                                             const_cast<Dtype*>(from), to));
   }
   inline static void PushBcast(const int count, Dtype* data) {
-    instance().Push(MPIJobQueue<Dtype>::Job(OP_BCAST, count, data, data));
+    Get().Push(MPIJobQueue<Dtype>::Job(OP_BCAST, count, data, data));
   }
 
 private:
   MPIJobQueue();
-  ~MPIJobQueue();
 
   void ThreadFunc();
   void WaitAll();
@@ -67,6 +72,8 @@ private:
   boost::shared_ptr<boost::thread> thread_;
   boost::condition_variable cv_work_;
   boost::condition_variable cv_done_;
+
+  static shared_ptr<MPIJobQueue<Dtype> > singleton_;
 
   DISABLE_COPY_AND_ASSIGN(MPIJobQueue);
 };

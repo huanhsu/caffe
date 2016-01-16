@@ -1065,8 +1065,7 @@ void Net<Dtype>::SyncDiff() {
   if (Caffe::mpi_size() <= 1) return;
   MPIJobQueue<Dtype>::Synchronize();
   for (int param_id = 0; param_id < params_.size(); ++param_id) {
-    int param_owner = param_owners_[param_id];
-    if (param_owner != -1 && param_owner != param_id) continue;
+    if (param_owners_[param_id] >= 0) continue;
     int layer_id = param_layer_indices_[param_id].first;
     const string& layer_name = layers_[layer_id]->layer_param().name();
     if (serial_layers_.find(layer_name) != serial_layers_.end()) continue;

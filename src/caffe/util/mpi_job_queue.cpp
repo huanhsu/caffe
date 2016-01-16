@@ -5,16 +5,14 @@
 #include "caffe/util/mpi_templates.hpp"
 
 
+using boost::shared_ptr;
 using boost::mutex;
 using boost::lock_guard;
 
 namespace caffe {
 
 template <typename Dtype>
-MPIJobQueue<Dtype>& MPIJobQueue<Dtype>::instance() {
-  static MPIJobQueue<Dtype> instance;
-  return instance;
-}
+shared_ptr<MPIJobQueue<Dtype> > MPIJobQueue<Dtype>::singleton_;
 
 template <typename Dtype>
 MPIJobQueue<Dtype>::MPIJobQueue()
@@ -36,7 +34,6 @@ MPIJobQueue<Dtype>::MPIJobQueue()
 template <typename Dtype>
 MPIJobQueue<Dtype>::~MPIJobQueue<Dtype>() {
   try {
-    WaitAll();
     is_running_.store(false);
     cv_work_.notify_one();
     thread_->join();
