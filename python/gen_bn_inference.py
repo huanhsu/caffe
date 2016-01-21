@@ -77,8 +77,7 @@ def main(args):
             if layer.bottom[0] in bottom_layer.top:
                 W, b = weights.params[bottom_layer.name]
                 num = W.data.shape[0]
-                W.data[...] = (W.data * scale[:, None, None, None]
-                                      * invstd[:, None, None, None])
+                W.data[...] = (W.data.transpose() * scale * invstd).transpose()
                 b.data[...] = (b.data[...] - mean) * scale * invstd + bias
 
     # Save the caffemodel
