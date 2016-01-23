@@ -204,6 +204,53 @@ class DropoutLayer : public NeuronLayer<Dtype> {
 };
 
 /**
+ * @brief During training only, sets a random portion of @f$x@f$ to 0, adjusting
+ *        the rest of the vector magnitude accordingly. Guided by some other
+ *        information when choose which neurons to be dropped.
+ */
+template <typename Dtype>
+class GuidedDropoutLayer : public NeuronLayer<Dtype> {
+ public:
+  explicit GuidedDropoutLayer(const LayerParameter& param)
+      : NeuronLayer<Dtype>(param) {}
+  virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+
+  virtual inline int ExactNumBottomBlobs() const { return 2; }
+  virtual inline int ExactNumTopBlobs() const { return 1; }
+
+  virtual inline const char* type() const { return "GuidedDropout"; }
+
+ protected:
+  virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Forward_gpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top);
+  virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
+  virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
+
+  inline virtual void BackwardSOD_cpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
+    Backward_cpu(top, propagate_down, bottom);
+  }
+  inline virtual void BackwardSOD_gpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
+    Backward_gpu(top, propagate_down, bottom);
+  }
+
+  std::string type_;
+  Dtype guidance_threshold_;
+  Dtype sigmoid_scaler_;
+
+  Blob<Dtype> rand_vec_;
+  Blob<Dtype> scale_;
+};
+
+/**
  * @brief Computes @f$ y = \gamma ^ {\alpha x + \beta} @f$,
  *        as specified by the scale @f$ \alpha @f$, shift @f$ \beta @f$,
  *        and base @f$ \gamma @f$.

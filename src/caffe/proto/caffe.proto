@@ -364,6 +364,7 @@ message LayerParameter {
   optional EltwiseParameter eltwise_param = 110;
   optional ExpParameter exp_param = 111;
   optional FlattenParameter flatten_param = 135;
+  optional GuidedDropoutParameter guided_dropout_param = 138;
   optional HDF5DataParameter hdf5_data_param = 112;
   optional HDF5OutputParameter hdf5_output_param = 113;
   optional HingeLossParameter hinge_loss_param = 114;
@@ -552,6 +553,12 @@ message DataParameter {
 
 message DropoutParameter {
   optional float dropout_ratio = 1 [default = 0.5]; // dropout ratio
+}
+
+message GuidedDropoutParameter {
+  optional string type = 1 [default = "deterministic"];
+  optional float guidance_threshold = 2 [default = 0];
+  optional float sigmoid_scaler = 3 [default = 1.0];
 }
 
 // DummyDataLayer fills any number of arbitrarily shaped blobs with random
