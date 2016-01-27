@@ -24,7 +24,9 @@ using caffe::shared_ptr;
 using caffe::Timer;
 using caffe::vector;
 using caffe::caffe_scal;
+#ifdef USE_MPI
 using caffe::MPIJobQueue;
+#endif
 
 
 DEFINE_string(gpu, "",

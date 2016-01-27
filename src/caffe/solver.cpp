@@ -16,7 +16,9 @@
 #include "caffe/util/upgrade_proto.hpp"
 #include "caffe/util/mpi_job_queue.hpp"
 
+#ifdef USE_MPI
 #include "mpi.h"
+#endif
 
 namespace caffe {
 
