@@ -97,6 +97,9 @@ message NetParameter {
   // Total memory allowed to be used for workspaces in cudnn's convolution, in MBs. default is 300MB.
   // The framework will try to find the fastest setup given this limit.
   optional int32 richness = 9 [default = 300];
+
+  // Whether the network will insert MPIGather layers automatically.
+  optional bool auto_insert_gathers = 10 [default = true];
 }
 
 // NOTE
