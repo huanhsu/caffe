@@ -172,11 +172,11 @@ shared_ptr<Layer<Dtype> > GetBNLayer(const LayerParameter& param) {
   BNParameter_Engine engine = param.bn_param().engine();
   if (engine == BNParameter_Engine_DEFAULT) {
     engine = BNParameter_Engine_CAFFE;
-#if defined(USE_CUDNN)
-#if CUDNN_VERSION_MIN(4, 0, 0)
-    engine = BNParameter_Engine_CUDNN;
-#endif
-#endif
+// #if defined(USE_CUDNN)
+// #if CUDNN_VERSION_MIN(4, 0, 0)
+//     engine = BNParameter_Engine_CUDNN;
+// #endif
+// #endif
   }
 #if defined(USE_CUDNN)
 #if CUDNN_VERSION_MIN(4, 0, 0)
