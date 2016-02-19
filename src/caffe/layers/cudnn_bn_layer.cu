@@ -45,7 +45,7 @@ void CuDNNBNLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
         bottom_desc_, bottom_data,
         top_desc_, top_data,
         bn_param_desc_, scale_data, bias_data,
-        this->bn_momentum_,
+        1 - this->bn_momentum_,
         running_mean_data, running_inv_variance_data,
         this->bn_eps_,
         save_mean_data, save_inv_variance_data));
