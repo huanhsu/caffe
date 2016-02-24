@@ -329,8 +329,8 @@ void Solver<Dtype>::Test(const int test_net_id) {
 #ifdef USE_MPI
     if (Caffe::mpi_size() > 1) {
       test_net->SyncOutput();
-      MPIJobQueue<float>::PushSumAll(1, &iter_loss);
-      MPIJobQueue<float>::Synchronize();
+      MPIJobQueue<Dtype>::PushSumAll(1, &iter_loss);
+      MPIJobQueue<Dtype>::Synchronize();
       iter_loss /= Caffe::mpi_size();
     }
 #endif
