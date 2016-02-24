@@ -326,6 +326,14 @@ void Solver<Dtype>::Test(const int test_net_id) {
     Dtype iter_loss;
     const vector<Blob<Dtype>*>& result =
         test_net->Forward(bottom_vec, &iter_loss);
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      test_net->SyncOutput();
+      MPIJobQueue<float>::PushSumAll(1, &iter_loss);
+      MPIJobQueue<float>::Synchronize();
+      iter_loss /= Caffe::mpi_size();
+    }
+#endif
     if (param_.test_compute_loss()) {
       loss += iter_loss;
     }
