@@ -97,6 +97,9 @@ message NetParameter {
   // Total memory allowed to be used for workspaces in cudnn's convolution, in MBs. default is 300MB.
   // The framework will try to find the fastest setup given this limit.
   optional int32 richness = 9 [default = 300];
+
+  // Whether the network will insert MPIGather layers automatically.
+  optional bool auto_insert_gathers = 10 [default = true];
 }
 
 // NOTE
@@ -415,6 +418,8 @@ message TransformationParameter {
   // Specify if we would like to have non-square crop. Will overwrite crop_size.
   optional uint32 crop_height = 8 [default = 0];
   optional uint32 crop_width = 9 [default = 0];
+  // Specify if we would like to have discrete multiple scales.
+  repeated float multi_scale_levels = 10;
 }
 
 // Message that stores parameters shared by loss layers

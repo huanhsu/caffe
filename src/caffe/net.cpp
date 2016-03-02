@@ -60,7 +60,8 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
       break;
     }
   }
-  if (Caffe::mpi_size() > 1 && !has_gather_or_scatter) {
+  if (Caffe::mpi_size() > 1 && in_param.auto_insert_gathers() &&
+      !has_gather_or_scatter) {
     DetermineLayerParallelOrSerial(param);
     InsertGathers(serial_layers_, &param);
   }
