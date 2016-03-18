@@ -36,19 +36,19 @@ inline int MPIAllreduce<double>(int count, void* sendbuf, void* recvbuf,
 }
 
 template <typename Dtype>
-inline int MPIGather(int count, const void* sendbuf, void* recvbuf,
-                     int root = 0, MPI_Comm comm = MPI_COMM_WORLD);
+inline int MPIAllgather(int count, const void* sendbuf, void* recvbuf,
+                        MPI_Comm comm = MPI_COMM_WORLD);
 template <>
-inline int MPIGather<float>(int count, const void* sendbuf, void* recvbuf,
-                            int root, MPI_Comm comm) {
-  return MPI_Gather(sendbuf, count, MPI_FLOAT, recvbuf, count, MPI_FLOAT,
-      root, comm);
+inline int MPIAllgather<float>(int count, const void* sendbuf, void* recvbuf,
+                               MPI_Comm comm) {
+  return MPI_Allgather(sendbuf, count, MPI_FLOAT, recvbuf, count, MPI_FLOAT,
+                       comm);
 }
 template <>
-inline int MPIGather<double>(int count, const void* sendbuf, void* recvbuf,
-                             int root, MPI_Comm comm) {
-  return MPI_Gather(sendbuf, count, MPI_DOUBLE, recvbuf, count, MPI_DOUBLE,
-      root, comm);
+inline int MPIAllgather<double>(int count, const void* sendbuf, void* recvbuf,
+                                MPI_Comm comm) {
+  return MPI_Allgather(sendbuf, count, MPI_DOUBLE, recvbuf, count, MPI_DOUBLE,
+                       comm);
 }
 
 template <typename Dtype>

@@ -14,7 +14,11 @@
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
-#include "caffe/util/mpi_templates.hpp"
+#include "caffe/util/mpi_job_queue.hpp"
+
+#ifdef USE_MPI
+#include "mpi.h"
+#endif
 
 namespace caffe {
 
@@ -86,9 +90,7 @@ void Solver<Dtype>::InitTrainNet() {
   net_param.mutable_state()->CopyFrom(net_state);
   net_.reset(new Net<Dtype>(net_param));
 #ifdef USE_MPI
-  if (Caffe::mpi_size() > 1) {
-    net_->SyncLayers();
-  }
+  net_->SyncData();
 #endif
 }
 
@@ -166,9 +168,7 @@ void Solver<Dtype>::InitTestNets() {
     test_nets_[i].reset(new Net<Dtype>(net_params[i]));
     test_nets_[i]->set_debug_info(param_.debug_info());
 #ifdef USE_MPI
-    if (Caffe::mpi_size() > 1) {
-      test_nets_[i]->SyncLayers();
-    }
+    test_nets_[i]->SyncData();
 #endif
   }
 }
@@ -195,9 +195,18 @@ void Solver<Dtype>::Step(int iters) {
     // accumulate the loss and gradient
     Dtype loss = 0;
     for (int i = 0; i < param_.iter_size(); ++i) {
-      loss += net_->ForwardBackward(bottom_vec);
+      loss += net_->ForwardBackward(bottom_vec, param_.iter_size() - i - 1);
     }
     loss /= param_.iter_size();
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      net_->SyncDiff();
+      net_->SyncOutput();
+      MPIJobQueue<Dtype>::PushSumAll(1, &loss);
+      MPIJobQueue<Dtype>::Synchronize();
+      loss /= Caffe::mpi_size();
+    }
+#endif
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {
       losses.push_back(loss);
@@ -213,8 +222,6 @@ void Solver<Dtype>::Step(int iters) {
       const vector<Blob<Dtype>*>& result = net_->output_blobs();
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
-        /// TODO: Check whether the result is an output of a parallel layer.
-        /// If so, average across MPI processes.
         const Dtype* result_vec = result[j]->cpu_data();
         const string& output_name =
             net_->blob_names()[net_->output_blob_indices()[j]];
@@ -263,6 +270,12 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   if (param_.snapshot_after_train()
       && (!param_.snapshot() || iter_ % param_.snapshot() != 0)) {
     Snapshot();
+#ifdef USE_MPI
+  if (Caffe::mpi_size() > 1) {
+    MPIJobQueue<Dtype>::Synchronize();
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+#endif
   }
   // After the optimization is done, run an additional train and test pass to
   // display the train and test loss/outputs if appropriate (based on the
@@ -273,6 +286,13 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   if (param_.display() && iter_ % param_.display() == 0) {
     Dtype loss;
     net_->ForwardPrefilled(&loss);
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      MPIJobQueue<Dtype>::PushSumAll(1, &loss);
+      MPIJobQueue<Dtype>::Synchronize();
+      loss /= Caffe::mpi_size();
+    }
+#endif
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << loss;
   }
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
@@ -283,6 +303,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
 template <typename Dtype>
 void Solver<Dtype>::TestAll() {
+#ifdef USE_MPI
+  net_->SyncData();
+#endif
   for (int test_net_id = 0; test_net_id < test_nets_.size(); ++test_net_id) {
     Test(test_net_id);
   }
@@ -303,6 +326,14 @@ void Solver<Dtype>::Test(const int test_net_id) {
     Dtype iter_loss;
     const vector<Blob<Dtype>*>& result =
         test_net->Forward(bottom_vec, &iter_loss);
+#ifdef USE_MPI
+    if (Caffe::mpi_size() > 1) {
+      test_net->SyncOutput();
+      MPIJobQueue<Dtype>::PushSumAll(1, &iter_loss);
+      MPIJobQueue<Dtype>::Synchronize();
+      iter_loss /= Caffe::mpi_size();
+    }
+#endif
     if (param_.test_compute_loss()) {
       loss += iter_loss;
     }
@@ -415,6 +446,7 @@ void Solver<Dtype>::Restore(const char* state_file) {
 //    - sigmoid: the effective learning rate follows a sigmod decay
 //      return base_lr ( 1/(1 + exp(-gamma * (iter - stepsize))))
 //    - stepdecr: return base_lr * (1 - gamma * (floor(iter / step)))
+//    - smoothstep: return base_lr * gamma ^ (iter / step)
 //
 // where base_lr, max_iter, gamma, step, stepvalue and power are defined
 // in the solver parameter protocol buffer, and iter is the current iteration.
@@ -455,6 +487,9 @@ Dtype SGDSolver<Dtype>::GetLearningRate() {
     this->current_step_ = this->iter_ / this->param_.stepsize();
     rate = this->param_.base_lr() *
         (Dtype(1) - this->param_.gamma() * this->current_step_);
+  } else if (lr_policy == "smoothstep") {
+    rate = this->param_.base_lr() * pow(this->param_.gamma(),
+        Dtype(this->iter_) / Dtype(this->param_.stepsize()));
   } else {
     LOG(FATAL) << "Unknown learning rate policy: " << lr_policy;
   }
@@ -506,25 +541,6 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
   }
-
-#ifdef USE_MPI
-  if (Caffe::mpi_size() > 1) {
-    // Accumulate and average the gradients of parameters of parallel layers.
-    const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
-    const vector<shared_ptr<Layer<Dtype> > >& net_layers = this->net_->layers();
-    const vector<pair<int, int> >& param_layer_indices =
-        this->net_->param_layer_indices();
-    const set<string>& serial_layers = this->net_->serial_layers();
-    for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
-      const int layer_id = param_layer_indices[param_id].first;
-      const string& layer_name = net_layers[layer_id]->layer_param().name();
-      if (serial_layers.find(layer_name) != serial_layers.end()) continue;
-      MPIAllreduce<Dtype>(net_params[param_id]->count(), MPI_IN_PLACE,
-          net_params[param_id]->mutable_cpu_diff(), MPI_SUM);
-    }
-  }
-#endif
-
   ClipGradients();
   for (int param_id = 0; param_id < this->net_->learnable_params().size();
        ++param_id) {

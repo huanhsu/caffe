@@ -9,14 +9,15 @@
 
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
+#include "caffe/vision_layers.hpp"
 #include "caffe/net.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/hdf5.hpp"
 #include "caffe/util/insert_splits.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
-#include "caffe/util/mpi_templates.hpp"
 #include "caffe/util/insert_gathers.hpp"
+#include "caffe/util/mpi_job_queue.hpp"
 
 #include "caffe/test/test_caffe_main.hpp"
 
@@ -59,7 +60,8 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
       break;
     }
   }
-  if (Caffe::mpi_size() > 1 && !has_gather_or_scatter) {
+  if (Caffe::mpi_size() > 1 && in_param.auto_insert_gathers() &&
+      !has_gather_or_scatter) {
     DetermineLayerParallelOrSerial(param);
     InsertGathers(serial_layers_, &param);
   }
@@ -79,6 +81,9 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
         << "Exactly one input_shape must be specified per input.";
   }
   memory_used_ = 0;
+#ifdef USE_CUDNN
+  Caffe::set_cudnn_mem_richness(param.richness());
+#endif
   // set the input blobs
   for (int input_id = 0; input_id < param.input_size(); ++input_id) {
     const int layer_id = -1;  // inputs have fake layer ID -1
@@ -96,6 +101,24 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     // Inherit phase from net if unset.
     if (!param.layer(layer_id).has_phase()) {
       param.mutable_layer(layer_id)->set_phase(phase_);
+    }
+    // Setup BN params implicitly.
+    if (param.layer(layer_id).type() == "BN") {
+      LayerParameter* layer_param = param.mutable_layer(layer_id);
+      if (layer_param->param_size() > 2) {
+        LOG(FATAL) << "Layer " << layer_param->name()
+                   << " must have no more than two specified params";
+      }
+      while (layer_param->param_size() < 4) {
+        ParamSpec* param = layer_param->add_param();
+        if (layer_param->param_size() <= 2) {
+          param->set_lr_mult(1);
+          param->set_decay_mult(0);
+        } else {
+          param->set_lr_mult(0);
+          param->set_decay_mult(0);
+        }
+      }
     }
     // Setup layer.
     const LayerParameter& layer_param = param.layer(layer_id);
@@ -541,6 +564,9 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
     loss += layer_loss;
     if (debug_info_) { ForwardDebugInfo(i); }
   }
+#ifdef USE_CUDNN
+  CuDNNConvolutionLayer<Dtype>::RuntimeOptimize(1000);
+#endif
   return loss;
 }
 
@@ -596,7 +622,7 @@ string Net<Dtype>::Forward(const string& input_blob_protos, Dtype* loss) {
 }
 
 template <typename Dtype>
-void Net<Dtype>::BackwardFromTo(int start, int end) {
+void Net<Dtype>::BackwardFromTo(int start, int end, int remaining_sub_iter) {
   CHECK_GE(end, 0);
   CHECK_LT(start, layers_.size());
   for (int i = start; i >= end; --i) {
@@ -604,6 +630,31 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
       layers_[i]->Backward(
           top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
       if (debug_info_) { BackwardDebugInfo(i); }
+#ifdef USE_MPI
+      // Sync the gradients by pushing to the mpi job queue.
+      if (serial_layers_.find(layers_[i]->layer_param().name()) !=
+          serial_layers_.end()) continue;
+      if (Caffe::mpi_size() <= 1 || remaining_sub_iter > 0) continue;
+      for (int n = 0; n < param_layer_indices_.size(); ++n) {
+        bool ready_for_sync = false;
+        if ((param_layer_indices_[n].first == i)) {
+          ready_for_sync = true;
+          if (param_owners_[n] != -1) {
+            int owner_id = param_owners_[n];
+            for (int m = n - 1; m >= 0; --m) {
+              if (param_owners_[m] == owner_id &&
+                  param_layer_indices_[m].first >= end) {
+                ready_for_sync = false;
+                break;
+              }
+            }
+          }
+        }
+        if (!ready_for_sync) continue;
+        MPIJobQueue<Dtype>::PushSumAll(
+            this->params_[n]->count(), this->params_[n]->mutable_cpu_diff());
+      }
+#endif
     }
   }
 }
@@ -714,18 +765,18 @@ void Net<Dtype>::ShareTrainedLayersWith(const Net* other) {
 }
 
 template <typename Dtype>
-void Net<Dtype>::BackwardFrom(int start) {
-  BackwardFromTo(start, 0);
+void Net<Dtype>::BackwardFrom(int start, int remaining_sub_iter) {
+  BackwardFromTo(start, 0, remaining_sub_iter);
 }
 
 template <typename Dtype>
-void Net<Dtype>::BackwardTo(int end) {
-  BackwardFromTo(layers_.size() - 1, end);
+void Net<Dtype>::BackwardTo(int end, int remaining_sub_iter) {
+  BackwardFromTo(layers_.size() - 1, end, remaining_sub_iter);
 }
 
 template <typename Dtype>
-void Net<Dtype>::Backward() {
-  BackwardFromTo(layers_.size() - 1, 0);
+void Net<Dtype>::Backward(int remaining_sub_iter) {
+  BackwardFromTo(layers_.size() - 1, 0, remaining_sub_iter);
   if (debug_info_) {
     Dtype asum_data = 0, asum_diff = 0, sumsq_data = 0, sumsq_diff = 0;
     for (int i = 0; i < params_.size(); ++i) {
@@ -748,6 +799,9 @@ void Net<Dtype>::Reshape() {
   for (int i = 0; i < layers_.size(); ++i) {
     layers_[i]->Reshape(bottom_vecs_[i], top_vecs_[i]);
   }
+#ifdef USE_CUDNN
+  CuDNNConvolutionLayer<Dtype>::RuntimeOptimize(1000);
+#endif
 }
 
 template <typename Dtype>
@@ -998,13 +1052,45 @@ const shared_ptr<Layer<Dtype> > Net<Dtype>::layer_by_name(
 
 #ifdef USE_MPI
 template <typename Dtype>
-void Net<Dtype>::SyncLayers() {
-  for (int i = 0; i < layers_.size(); ++i) {
-    vector<shared_ptr<Blob<Dtype> > >& blobs = layers_[i]->blobs();
-    for (int j = 0; j < blobs.size(); ++j) {
-      MPIBcast<Dtype>(blobs[j]->count(), blobs[j]->mutable_cpu_data());
-      MPIBcast<Dtype>(blobs[j]->count(), blobs[j]->mutable_cpu_diff());
-    }
+void Net<Dtype>::SyncData() {
+  if (Caffe::mpi_size() <= 1) return;
+  for (int i = 0; i < learnable_params_.size(); ++i) {
+    Blob<Dtype>* param = learnable_params_[i];
+    MPIJobQueue<Dtype>::PushBcast(param->count(), param->mutable_cpu_data());
+  }
+  MPIJobQueue<Dtype>::Synchronize();
+}
+
+template <typename Dtype>
+void Net<Dtype>::SyncDiff() {
+  if (Caffe::mpi_size() <= 1) return;
+  MPIJobQueue<Dtype>::Synchronize();
+  for (int param_id = 0; param_id < params_.size(); ++param_id) {
+    if (param_owners_[param_id] >= 0) continue;
+    int layer_id = param_layer_indices_[param_id].first;
+    const string& layer_name = layers_[layer_id]->layer_param().name();
+    if (serial_layers_.find(layer_name) != serial_layers_.end()) continue;
+#ifndef CPU_ONLY
+    caffe_gpu_scal(params_[param_id]->count(), Dtype(1. / Caffe::mpi_size()),
+                   params_[param_id]->mutable_gpu_diff());
+#else
+    caffe_scal(params_[param_id]->count(), Dtype(1. / Caffe::mpi_size()),
+               params_[param_id]->mutable_cpu_diff());
+#endif
+  }
+}
+
+template <typename Dtype>
+void Net<Dtype>::SyncOutput() {
+  if (Caffe::mpi_size() <= 1) return;
+  for (int i = 0; i < net_output_blobs_.size(); ++i) {
+    MPIJobQueue<Dtype>::PushSumAll(net_output_blobs_[i]->count(),
+        net_output_blobs_[i]->mutable_cpu_data());
+  }
+  MPIJobQueue<Dtype>::Synchronize();
+  for (int i = 0; i < net_output_blobs_.size(); ++i) {
+    caffe_scal(net_output_blobs_[i]->count(), Dtype(1. / Caffe::mpi_size()),
+               net_output_blobs_[i]->mutable_cpu_data());
   }
 }
 
@@ -1068,7 +1154,6 @@ void Net<Dtype>::DetermineLayerParallelOrSerial(const NetParameter& param) {
     }
   }
 }
-
 #endif
 
 INSTANTIATE_CLASS(Net);

@@ -68,10 +68,10 @@ class Net {
    * computes the gradient w.r.t the parameters, and the data has already been
    * provided during the forward pass.
    */
-  void Backward();
-  void BackwardFromTo(int start, int end);
-  void BackwardFrom(int start);
-  void BackwardTo(int end);
+  void Backward(int remaining_sub_iter = 0);
+  void BackwardFromTo(int start, int end, int remaining_sub_iter = 0);
+  void BackwardFrom(int start, int remaining_sub_iter = 0);
+  void BackwardTo(int end, int remaining_sub_iter = 0);
 
   /**
    * @brief Reshape all layers from bottom to top.
@@ -81,10 +81,11 @@ class Net {
    */
   void Reshape();
 
-  Dtype ForwardBackward(const vector<Blob<Dtype>* > & bottom) {
+  Dtype ForwardBackward(const vector<Blob<Dtype>* > & bottom,
+                        int remaining_sub_iter = 0) {
     Dtype loss;
     Forward(bottom, &loss);
-    Backward();
+    Backward(remaining_sub_iter);
     return loss;
   }
 
@@ -120,7 +121,9 @@ class Net {
 
 #ifdef USE_MPI
   // Synchronize the parameters of each layer among all the MPI processors.
-  void SyncLayers();
+  void SyncData();
+  void SyncDiff();
+  void SyncOutput();
 #endif
 
   /// @brief returns the network name.

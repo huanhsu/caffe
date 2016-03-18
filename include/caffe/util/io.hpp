@@ -88,8 +88,18 @@ inline bool ReadFileToDatum(const string& filename, Datum* datum) {
 }
 
 bool ReadImageToDatum(const string& filename, const int label,
+    const int w_off, const int h_off,
+    const int crop_width, const int crop_height,
+    const int context_pad_height, const int context_pad_width,
     const int height, const int width, const bool is_color,
     const std::string & encoding, Datum* datum);
+
+inline bool ReadImageToDatum(const string& filename, const int label,
+    const int height, const int width, const bool is_color,
+    const std::string & encoding, Datum* datum) {
+  return ReadImageToDatum(filename, label, -1, -1, 0, 0, 0, 0,
+                          height, width, is_color, encoding, datum);
+}
 
 inline bool ReadImageToDatum(const string& filename, const int label,
     const int height, const int width, const bool is_color, Datum* datum) {
@@ -118,11 +128,25 @@ inline bool ReadImageToDatum(const string& filename, const int label,
 }
 
 bool ReadImageToDatumResizeShortSide(const string& filename, const int label,
+    const int w_off, const int h_off,
+    const int crop_width, const int crop_height,
     const int short_side, const bool is_color,
-    const std::string & encoding, Datum* datum);
+    const std::string& encoding, Datum* datum);
+
+inline bool ReadImageToDatumResizeShortSide(const string& filename,
+    const int label, const int short_side, const bool is_color,
+    const std::string& encoding, Datum* datum) {
+  return ReadImageToDatumResizeShortSide(filename, label, -1, -1, 0, 0,
+                                         short_side, is_color, encoding, datum);
+}
 
 bool DecodeDatumNative(Datum* datum);
 bool DecodeDatum(Datum* datum, bool is_color);
+
+cv::Mat ReadImageToCVMat(const string& filename,
+    const int w_off, const int h_off,
+    const int crop_width, const int crop_height,
+    const int height, const int width, const bool is_color);
 
 cv::Mat ReadImageToCVMat(const string& filename,
     const int height, const int width, const bool is_color);
@@ -134,6 +158,11 @@ cv::Mat ReadImageToCVMat(const string& filename,
     const bool is_color);
 
 cv::Mat ReadImageToCVMat(const string& filename);
+
+cv::Mat ReadImageToCVMatResizeShortSide(const string& filename,
+    const int w_off, const int h_off,
+    const int crop_width, const int crop_height,
+    const int short_side, const bool is_color);
 
 cv::Mat ReadImageToCVMatResizeShortSide(const string& filename,
     const int short_side, const bool is_color);

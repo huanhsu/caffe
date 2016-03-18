@@ -95,6 +95,13 @@ message NetParameter {
 
   // DEPRECATED: use 'layer' instead.
   repeated V1LayerParameter layers = 2;
+
+  // Total memory allowed to be used for workspaces in cudnn's convolution, in MBs. default is 300MB.
+  // The framework will try to find the fastest setup given this limit.
+  optional int32 richness = 9 [default = 300];
+
+  // Whether the network will insert MPIGather layers automatically.
+  optional bool auto_insert_gathers = 10 [default = true];
 }
 
 // NOTE
@@ -169,6 +176,7 @@ message SolverParameter {
   //    - sigmoid: the effective learning rate follows a sigmod decay
   //      return base_lr ( 1/(1 + exp(-gamma * (iter - stepsize))))
   //    - stepdecr: return base_lr * (1 - gamma * (floor(iter / step)))
+  //    - smoothstep: return base_lr * gamma ^ (iter / step)
   //
   // where base_lr, max_iter, gamma, step, stepvalue and power are defined
   // in the solver parameter protocol buffer, and iter is the current iteration.
@@ -412,6 +420,8 @@ message TransformationParameter {
   // Specify if we would like to have non-square crop. Will overwrite crop_size.
   optional uint32 crop_height = 8 [default = 0];
   optional uint32 crop_width = 9 [default = 0];
+  // Specify if we would like to have discrete multiple scales.
+  repeated float multi_scale_levels = 10;
 }
 
 // Message that stores parameters shared by loss layers
@@ -452,9 +462,18 @@ message ArgMaxParameter {
 message BNParameter {
   optional FillerParameter slope_filler = 1;
   optional FillerParameter bias_filler = 2;
-  optional bool moving_average = 3 [default = true];
-  optional float momentum = 4 [default = 0.9];
-  optional float eps = 5 [default = 1e-7];
+  optional float momentum = 3 [default = 0.9];
+  optional float eps = 4 [default = 1e-5];
+  // If true, will use the moving average mean and std for training and test.
+  // Will override the lr_param and freeze all the parameters.
+  // Make sure to initialize the layer properly with pretrained parameters.
+  optional bool frozen = 5 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    CUDNN = 2;
+  }
+  optional Engine engine = 6 [default = DEFAULT];
 }
 
 message ConcatParameter {

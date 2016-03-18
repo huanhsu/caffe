@@ -1,4 +1,5 @@
 #include <opencv2/core/core.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 
 #include <string>
 #include <vector>
@@ -32,6 +33,14 @@ DataTransformer<Dtype>::DataTransformer(const TransformationParameter& param,
       mean_values_.push_back(param_.mean_value(c));
     }
   }
+  // check if we want to use multi-scale augmentation
+  if (param_.multi_scale_levels_size() > 0) {
+    CHECK(param_.has_mean_file() == false) <<
+      "Cannot specify mean_file and multi_scale_levels at the same time";
+    for (int i = 0; i < param_.multi_scale_levels_size(); ++i) {
+      multi_scale_levels_.push_back(param_.multi_scale_levels(i));
+    }
+  }
 }
 
 template<typename Dtype>
@@ -40,14 +49,17 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   const int crop_size = param_.crop_size();
   const string& data = datum.data();
   const int datum_channels = datum.channels();
-  const int datum_height = datum.height();
-  const int datum_width = datum.width();
+  int datum_height = datum.height();
+  int datum_width = datum.width();
 
   int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
   int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+  Dtype scale_level = multi_scale_levels_.empty() ? Dtype(1) :
+                      multi_scale_levels_[Rand(multi_scale_levels_.size())];
 
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
+  const bool do_multi_scale = (scale_level != Dtype(1));
   const bool has_mean_file = param_.has_mean_file();
   const bool has_uint8 = data.size() > 0;
   const bool has_mean_values = mean_values_.size() > 0;
@@ -72,6 +84,11 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
         mean_values_.push_back(mean_values_[0]);
       }
     }
+  }
+
+  if (do_multi_scale) {
+    datum_height = static_cast<int>(round(datum_height * scale_level));
+    datum_width = static_cast<int>(round(datum_width * scale_level));
   }
 
   int height = datum_height;
@@ -99,6 +116,26 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
   Dtype datum_element;
   int top_index, data_index;
   for (int c = 0; c < datum_channels; ++c) {
+    cv::Mat cv_resized_img;
+    if (do_multi_scale) {
+      cv::Mat cv_img(datum.height(), datum.width(),
+                     has_uint8 ? CV_8UC1 : CV_32FC1);
+      for (int h = 0; h < datum.height(); ++h) {
+        for (int w = 0; w < datum.width(); ++w) {
+          int data_index = (c * datum.height() + h) * datum.width() + w;
+          if (has_uint8) {
+            cv_img.at<uchar>(h, w) = static_cast<uint8_t>(data[data_index]);
+          } else {
+            cv_img.at<float>(h, w) = datum.float_data(data_index);
+          }
+        }
+      }
+      cv::resize(cv_img, cv_resized_img, cv::Size(0, 0),
+                 scale_level, scale_level);
+      CHECK_EQ(datum_height, cv_resized_img.rows);
+      CHECK_EQ(datum_width, cv_resized_img.cols);
+    }
+
     for (int h = 0; h < height; ++h) {
       for (int w = 0; w < width; ++w) {
         data_index = (c * datum_height + h_off + h) * datum_width + w_off + w;
@@ -107,11 +144,21 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
         } else {
           top_index = (c * height + h) * width + w;
         }
-        if (has_uint8) {
-          datum_element =
-            static_cast<Dtype>(static_cast<uint8_t>(data[data_index]));
+        if (do_multi_scale) {
+          if (has_uint8) {
+            datum_element = static_cast<Dtype>(
+                cv_resized_img.at<uint8_t>(h_off + h, w_off + w));
+          } else {
+            datum_element = static_cast<Dtype>(
+                cv_resized_img.at<float>(h_off + h, w_off + w));
+          }
         } else {
-          datum_element = datum.float_data(data_index);
+          if (has_uint8) {
+            datum_element =
+              static_cast<Dtype>(static_cast<uint8_t>(data[data_index]));
+          } else {
+            datum_element = datum.float_data(data_index);
+          }
         }
         if (has_mean_file) {
           transformed_data[top_index] =
@@ -230,12 +277,14 @@ template<typename Dtype>
 void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
                                        Blob<Dtype>* transformed_blob) {
   const int crop_size = param_.crop_size();
-  const int img_channels = cv_img.channels();
-  const int img_height = cv_img.rows;
-  const int img_width = cv_img.cols;
+  int img_channels = cv_img.channels();
+  int img_height = cv_img.rows;
+  int img_width = cv_img.cols;
 
   int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
   int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+  Dtype scale_level = multi_scale_levels_.empty() ? Dtype(1) :
+                      multi_scale_levels_[Rand(multi_scale_levels_.size())];
 
   // Check dimensions.
   const int channels = transformed_blob->channels();
@@ -252,6 +301,7 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
 
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
+  const bool do_multi_scale = (scale_level != Dtype(1));
   const bool has_mean_file = param_.has_mean_file();
   const bool has_mean_values = mean_values_.size() > 0;
 
@@ -277,9 +327,19 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
     }
   }
 
+  cv::Mat cv_cropped_img = cv_img;
+  if (do_multi_scale) {
+    cv::Mat cv_resized_img;
+    cv::resize(cv_img, cv_resized_img, cv::Size(0, 0),
+               scale_level, scale_level);
+    img_channels = cv_resized_img.channels();
+    img_height = cv_resized_img.rows;
+    img_width = cv_resized_img.cols;
+    cv_cropped_img = cv_resized_img;
+  }
+
   int h_off = 0;
   int w_off = 0;
-  cv::Mat cv_cropped_img = cv_img;
   if (crop_height) {
     CHECK_EQ(crop_height, height);
     if (phase_ == TRAIN) {
@@ -299,7 +359,7 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
 
   if (crop_height || crop_width) {
     cv::Rect roi(w_off, h_off, width, height);
-    cv_cropped_img = cv_img(roi);
+    cv_cropped_img = cv_cropped_img(roi);
   } else {
     CHECK_EQ(img_height, height);
     CHECK_EQ(img_width, width);
@@ -349,6 +409,8 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
 
   int crop_height = param_.crop_height() > 0 ? param_.crop_height() : crop_size;
   int crop_width = param_.crop_width() > 0 ? param_.crop_width() : crop_size;
+  Dtype scale_level = multi_scale_levels_.empty() ? Dtype(1) :
+                      multi_scale_levels_[Rand(multi_scale_levels_.size())];
 
   if (transformed_blob->count() == 0) {
     // Initialize transformed_blob with the right shape.
@@ -374,8 +436,13 @@ void DataTransformer<Dtype>::Transform(Blob<Dtype>* input_blob,
 
   const Dtype scale = param_.scale();
   const bool do_mirror = param_.mirror() && Rand(2);
+  const bool do_multi_scale = (scale_level != Dtype(1));
   const bool has_mean_file = param_.has_mean_file();
   const bool has_mean_values = mean_values_.size() > 0;
+
+  CHECK(!do_multi_scale) <<
+    "Currently doesn't support multi-scale augmentation for this "
+    "transform function";
 
   int h_off = 0;
   int w_off = 0;
@@ -542,7 +609,8 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(
 template <typename Dtype>
 void DataTransformer<Dtype>::InitRand() {
   const bool needs_rand = param_.mirror() || (phase_ == TRAIN &&
-      (param_.crop_size() || param_.crop_height() || param_.crop_width()));
+      (param_.crop_size() || param_.crop_height() || param_.crop_width() ||
+       param_.multi_scale_levels_size() > 0));
   if (needs_rand) {
     const unsigned int rng_seed = caffe_rng_rand();
     rng_.reset(new Caffe::RNG(rng_seed));
