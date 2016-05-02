@@ -4,7 +4,7 @@ classify_multigpu.py typical usages:
 
 1. Single crop
     python2 classify_multigpu.py --gpu=[0,1] \
-        --input=data/ilsvrc/val.txt --root_dir=/path/to/imagenet \
+        --input=data/ilsvrc12/val.txt --root_dir=/path/to/imagenet \
         --model=deploy.prototxt --weights=pretrained.caffemodel \
         --batch_size=10 --resize=256
 
@@ -12,7 +12,7 @@ classify_multigpu.py typical usages:
     python2 convert_to_fully_conv.py deploy.prototxt pretrained.caffemodel
 
     python2 classify_multigpu.py --gpu=[0,1] \
-        --input=data/ilsvrc/val.txt --root_dir=/path/to/imagenet \
+        --input=data/ilsvrc12/val.txt --root_dir=/path/to/imagenet \
         --model=deploy_fully_conv.prototxt \
         --weights=pretrained_fully_conv.caffemodel \
         --batch_size=10 --resize=320 --crop_height=320 --crop_width=320
@@ -53,6 +53,8 @@ parser.add_argument('--output_blob', default='prob',
                     help="Output blob name")
 parser.add_argument('--batch_size', type=int, default=1,
                     help="Number of images per batch")
+parser.add_argument('--chunk_size', type=int, default=100,
+                    help="Number of batches send to each worker at once")
 # transformer parameters
 parser.add_argument(
     '--mean_file',
@@ -96,6 +98,16 @@ def _crop(im, crop_height, crop_width):
     return im[top:bottom, left:right]
 
 
+def _prep(transformer, input_shape, batch, result):
+    inputs = []
+    for i, (fpath, label) in enumerate(batch):
+        im = cv2.imread(fpath)
+        im = _resize(im, args.resize)
+        im = _crop(im, input_shape[2], input_shape[3])
+        inputs.append(transformer.preprocess(args.input_blob, im))
+    result.put(inputs)
+
+
 def _judge(labels, scores, top_k=[1]):
     assert(len(labels) == scores.shape[0])
     if scores.ndim > 2:
@@ -111,8 +123,8 @@ class BatchReader(mapreducer.BasicReader):
     def read(self, input_string):
         inputlist = glob.glob(input_string)
         inputlist.sort()
-        data = {}
-        batch_index = 0
+        # divide images into batches
+        batches = []
         for filename in inputlist:
             with open(filename, 'r') as fid:
                 lines = fid.readlines()
@@ -121,8 +133,14 @@ class BatchReader(mapreducer.BasicReader):
                     lines[i] = [osp.join(args.root_dir, line[0]), int(line[1])]
                 for i in xrange(0, len(lines), args.batch_size):
                     j = min(len(lines), i + args.batch_size)
-                    data[batch_index] = lines[i:j]
-                    batch_index = batch_index + 1
+                    batches.append(lines[i:j])
+        # divide batches into chunks
+        data = {}
+        chunk_index = 0
+        for i in xrange(0, len(batches), args.chunk_size):
+            j = min(len(batches), i + args.chunk_size)
+            data[chunk_index] = batches[i:j]
+            chunk_index = chunk_index + 1
         return data
 
 
@@ -148,23 +166,35 @@ class ClassifyMapper(mapreducer.BasicMapper):
             self.transformer.set_mean(args.input_blob, mu)
 
     def map(self, key, value):
-        # reshape according to batch size
-        self.input_shape[0] = len(value)
-        self.net.blobs[args.input_blob].reshape(*self.input_shape)
-        # load image and preprocess
+        # start a data loader process
+        queue = mp.Queue()
+        data_loader = mp.Process(target=_prep,
+            args=(self.transformer, self.input_shape, value[0], queue))
+        data_loader.start()
+        # go over the batches inside a chunk
         labels = []
-        for i, (fpath, label) in enumerate(value):
-            im = cv2.imread(fpath)
-            im = _resize(im, args.resize)
-            im = _crop(im, self.input_shape[2], self.input_shape[3])
-            self.net.blobs[args.input_blob].data[i, ...] = \
-                self.transformer.preprocess(args.input_blob, im)
-            labels.append(label)
-        # forward
-        self.net.forward()
-        out = self.net.blobs[args.output_blob].data
+        scores = []
+        for k, batch in enumerate(value):
+            data = queue.get()
+            data_loader.join()
+            # reshape according to batch size
+            assert len(batch) == len(data)
+            self.input_shape[0] = len(data)
+            self.net.blobs[args.input_blob].reshape(*self.input_shape)
+            for i, (fpath, label) in enumerate(batch):
+                self.net.blobs[args.input_blob].data[i, ...] = data[i]
+                labels.append(label)
+            # start preloading next batch
+            if k + 1 < len(value):
+                data_loader = mp.Process(target=_prep,
+                    args=(self.transformer, self.input_shape, value[k + 1], queue))
+                data_loader.start()
+            # forward
+            self.net.forward()
+            scores.append(self.net.blobs[args.output_blob].data.copy())
+        scores = np.vstack(scores)
         # get top1, top5 correctness vector
-        top1, top5 = _judge(labels, out, top_k=[1,5])
+        top1, top5 = _judge(labels, scores, top_k=[1,5])
         yield 'top1', top1
         yield 'top5', top5
 
