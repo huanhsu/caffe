@@ -1,3 +1,23 @@
+#!/usr/bin/env python2
+"""
+classify_multigpu.py typical usages:
+
+1. Single crop
+    python2 classify_multigpu.py --gpu=[0,1] \
+        --input=data/ilsvrc/val.txt --root_dir=/path/to/imagenet \
+        --model=deploy.prototxt --weights=pretrained.caffemodel \
+        --batch_size=10 --resize=256
+
+2. Multi-crop by fully convolution
+    python2 convert_to_fully_conv.py deploy.prototxt pretrained.caffemodel
+
+    python2 classify_multigpu.py --gpu=[0,1] \
+        --input=data/ilsvrc/val.txt --root_dir=/path/to/imagenet \
+        --model=deploy_fully_conv.prototxt \
+        --weights=pretrained_fully_conv.caffemodel \
+        --batch_size=10 --resize=320 --crop_height=320 --crop_width=320
+"""
+
 import numpy as np
 import os
 import os.path as osp
@@ -29,7 +49,7 @@ parser.add_argument('--weights', required=True,
                     help="Path to the pretrained caffemodel")
 parser.add_argument('--input_blob', default='data',
                     help="Input blob name")
-parser.add_argument('--output_blob', default='fc',
+parser.add_argument('--output_blob', default='prob',
                     help="Output blob name")
 parser.add_argument('--batch_size', type=int, default=1,
                     help="Number of images per batch")
